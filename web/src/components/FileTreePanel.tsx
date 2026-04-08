@@ -1,5 +1,4 @@
 ﻿import type { RepoNode } from '@ai-repo-assistant/shared'
-
 import { PanelCard } from './PanelCard'
 
 type FileTreePanelProps = {
@@ -80,16 +79,16 @@ export function FileTreePanel({
   onOpenFile,
   onToggleContext,
 }: FileTreePanelProps) {
-  const subtitle = repoRoot ? `${repoRoot} · ${selectedContextPaths.length} context file(s)` : 'Waiting for workspace bootstrap'
+  const subtitle = repoRoot ? `${repoRoot} · ${selectedContextPaths.length} 个上下文文件` : '无仓库加载'
 
   return (
     <PanelCard
-      title="Repository"
+      title="仓库"
       subtitle={subtitle}
       actions={<span className={`status-pill status-pill--${serverStatus}`}>{serverStatus}</span>}
     >
-      {isBootstrapping ? <p className="panel-empty">Loading mock repository…</p> : null}
-      {!isBootstrapping && nodes.length === 0 ? <p className="panel-empty">No files are available yet.</p> : null}
+      {isBootstrapping ? <p className="panel-empty">正在加载仓库...</p> : null}
+      {!isBootstrapping && nodes.length === 0 ? <p className="panel-empty">仓库中没有文件</p> : null}
       {!isBootstrapping ? (
         <div className="tree-root">
           {nodes.map((node) => (
