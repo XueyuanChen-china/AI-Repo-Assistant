@@ -1,0 +1,17 @@
+{
+  "name": "@ai-repo-assistant/root",
+  "private": true,
+  "packageManager": "bun@1.3.5",
+  "workspaces": [
+    "web",
+    "server",
+    "shared"
+  ],
+  "scripts": {
+    "dev:web": "bun --filter @ai-repo-assistant/web dev",
+    "dev:server": "bun --filter @ai-repo-assistant/server dev",
+    "build:web": "bun --filter @ai-repo-assistant/web build",
+    "build:server": "bun --filter @ai-repo-assistant/server build",
+    "typecheck": "bun --filter '*' typecheck"
+  }
+}
