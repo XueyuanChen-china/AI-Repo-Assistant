@@ -1,6 +1,7 @@
-﻿import { useEffect } from 'react'
+import { useEffect } from 'react'
 import {
   chatResponseSchema,
+  healthResponseSchema,
   repoFileResponseSchema,
   repoTreeResponseSchema,
   type RepoNode,
@@ -8,10 +9,9 @@ import {
 } from '@ai-repo-assistant/shared'
 
 import { ChatPanel } from '../components/ChatPanel'
-import { FileTreePanel } from '../components/FileTreePanel'
+import { FileTreePanel } from '../components/FileTreePanelExpired1'
 import { InspectorPanel } from '../components/InspectorPanel'
 import { useWorkspaceStore } from '../store/useWorkspaceStore'
-import { c } from 'node_modules/vite/dist/node/types.d-aGj9QkWt'
 
 // 一个小工具函数：请求接口并把 JSON 解析出来。
 // 后面你如果接更多接口，通常也会继续复用这个思路。
@@ -49,12 +49,27 @@ function buildErrorMessage(error: unknown) {
     return error.message
   }
 
-  return 'Unexpected error while talking to the local mock server.'
+  return 'Unexpected error while talking to the local server.'
+}
+
+function buildRepoTreeUrl(rootPath?: string) {
+  if (!rootPath) {
+    return '/api/repo/tree'
+  }
+
+  return `/api/repo/tree?root=${encodeURIComponent(rootPath)}`
+}
+
+function buildRepoFileUrl(rootPath: string, filePath: string) {
+  const encodedRoot = encodeURIComponent(rootPath)
+  const encodedPath = encodeURIComponent(filePath)
+  return `/api/repo/file?root=${encodedRoot}&path=${encodedPath}`
 }
 
 export function WorkspacePage() {
   // UI 状态：仓库结构与文件内容
   const repoRoot = useWorkspaceStore((state) => state.repoRoot)
+  const repoRootInput = useWorkspaceStore((state) => state.repoRootInput)
   const repoNodes = useWorkspaceStore((state) => state.repoNodes)
   const openFile = useWorkspaceStore((state) => state.openFile)
   const selectedContextPaths = useWorkspaceStore((state) => state.selectedContextPaths)
@@ -62,14 +77,12 @@ export function WorkspacePage() {
   // 聊天相关状态
   const messages = useWorkspaceStore((state) => state.messages)
   const draftMessage = useWorkspaceStore((state) => state.draftMessage)
-  const isSendingMessage = useWorkspaceStore((state) => state.isSendingMessage)
-
-  // 代码检查与预览状态
   const inspectorMode = useWorkspaceStore((state) => state.inspectorMode)
   const diffPreview = useWorkspaceStore((state) => state.diffPreview)
 
   // 系统状态
   const isBootstrapping = useWorkspaceStore((state) => state.isBootstrapping)
+  const isSendingMessage = useWorkspaceStore((state) => state.isSendingMessage)
   const serverStatus = useWorkspaceStore((state) => state.serverStatus)
   const errorMessage = useWorkspaceStore((state) => state.errorMessage)
 
@@ -77,8 +90,7 @@ export function WorkspacePage() {
   const setBootstrapping = useWorkspaceStore((state) => state.setBootstrapping)
   const setServerStatus = useWorkspaceStore((state) => state.setServerStatus)
   const setErrorMessage = useWorkspaceStore((state) => state.setErrorMessage)
-
-  // 业务逻辑方法
+  const setRepoRootInput = useWorkspaceStore((state) => state.setRepoRootInput)
   const bootstrapWorkspace = useWorkspaceStore((state) => state.bootstrapWorkspace)
   const openFilePreview = useWorkspaceStore((state) => state.openFilePreview)
   const toggleContextPath = useWorkspaceStore((state) => state.toggleContextPath)
@@ -88,61 +100,53 @@ export function WorkspacePage() {
   const finishAssistantMessage = useWorkspaceStore((state) => state.finishAssistantMessage)
   const setInspectorMode = useWorkspaceStore((state) => state.setInspectorMode)
 
+  async function loadWorkspace(nextRootCandidate?: string) {
+    setBootstrapping(true)
+    setServerStatus('checking')
+    setErrorMessage(null)
+
+    try {
+      //检测服务器状态，返回包含suggestedRoot字段的响应。
+      const healthPayload = healthResponseSchema.parse(await readJson('/api/health'))
+      // 决定要加载哪个仓库：优先使用函数参数里传入的路径（用户在输入框里填的），其次是当前状态里的 repoRootInput，再次是服务器建议的路径。
+      const requestedRoot = nextRootCandidate?.trim() || repoRootInput.trim() || healthPayload.suggestedRoot
+      //请求仓库树接口，拿到文件树数据。
+      const treePayload = repoTreeResponseSchema.parse(await readJson(buildRepoTreeUrl(requestedRoot)))
+      //
+      const firstFilePath = findFirstFilePath(treePayload.nodes)
+
+      const openFile = firstFilePath
+        ? repoFileResponseSchema.parse(await readJson(buildRepoFileUrl(treePayload.root, firstFilePath))).file
+        : null
+
+      bootstrapWorkspace({
+        root: treePayload.root,
+        nodes: treePayload.nodes,
+        openFile,
+      })
+      setServerStatus('online')
+    } catch (error) {
+      setServerStatus('offline')
+      setErrorMessage(buildErrorMessage(error))
+    } finally {
+      setBootstrapping(false)
+    }
+  }
+
   useEffect(() => {
-    // 页面首次进入时：先探活后端，再拉文件树，再默认打开第一个文件。
-    let cancelled = false
-
-    async function bootstrap() {
-      setBootstrapping(true)
-      setServerStatus('checking')
-      setErrorMessage(null)
-
-      try {
-        await readJson('/api/health')
-        const treePayload = repoTreeResponseSchema.parse(await readJson('/api/repo/tree'))
-        const firstFilePath = findFirstFilePath(treePayload.nodes)
-
-        const openFile = firstFilePath
-          ? repoFileResponseSchema.parse(
-            await readJson(`/api/repo/file?path=${encodeURIComponent(firstFilePath)}`),
-          ).file
-          : null
-
-        if (cancelled) {
-          return
-        }
-
-        bootstrapWorkspace({
-          root: treePayload.root,
-          nodes: treePayload.nodes,
-          openFile,
-        })
-        setServerStatus('online')
-      } catch (error) {
-        if (cancelled) {
-          return
-        }
-
-        setServerStatus('offline')
-        setErrorMessage(buildErrorMessage(error))
-      } finally {
-        if (!cancelled) {
-          setBootstrapping(false)
-        }
-      }
-    }
-
-    void bootstrap()
-
-    return () => {
-      cancelled = true
-    }
-  }, [bootstrapWorkspace, setBootstrapping, setErrorMessage, setServerStatus])
+    // Bootstrap once on page load: ping the server, then load the default repo.
+    void loadWorkspace()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function handleOpenFile(path: string) {
+    if (!repoRoot) {
+      return
+    }
+
     try {
       setErrorMessage(null)
-      const payload = repoFileResponseSchema.parse(await readJson(`/api/repo/file?path=${encodeURIComponent(path)}`))
+      const payload = repoFileResponseSchema.parse(await readJson(buildRepoFileUrl(repoRoot, path)))
       openFilePreview(payload.file)
     } catch (error) {
       setErrorMessage(buildErrorMessage(error))
@@ -180,7 +184,7 @@ export function WorkspacePage() {
       const fallbackMessage: WorkspaceMessage = {
         id: `assistant-error-${Date.now()}`,
         role: 'assistant',
-        content: `The mock assistant could not answer because the request failed. ${buildErrorMessage(error)}`,
+        content: `The assistant could not answer because the request failed. ${buildErrorMessage(error)}`,
         createdAt: new Date().toISOString(),
       }
 
@@ -212,11 +216,14 @@ export function WorkspacePage() {
       <main className="workspace-grid">
         <FileTreePanel
           repoRoot={repoRoot}
+          repoRootInput={repoRootInput}
           nodes={repoNodes}
           activePath={openFile?.path ?? null}
           selectedContextPaths={selectedContextPaths}
           serverStatus={serverStatus}
           isBootstrapping={isBootstrapping}
+          onRepoRootInputChange={setRepoRootInput}
+          onReloadRepo={() => void loadWorkspace(repoRootInput)}
           onOpenFile={handleOpenFile}
           onToggleContext={toggleContextPath}
         />

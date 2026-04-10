@@ -1,4 +1,4 @@
-﻿import type { DiffPreview, InspectorMode, RepoFile, RepoNode, WorkspaceMessage } from '@ai-repo-assistant/shared'
+import type { DiffPreview, InspectorMode, RepoFile, RepoNode, WorkspaceMessage } from '@ai-repo-assistant/shared'
 import { create } from 'zustand'
 
 type ServerStatus = 'checking' | 'online' | 'offline'
@@ -9,12 +9,12 @@ type BootstrapPayload = {
   openFile: RepoFile | null
 }
 
-// Zustand store 可以把它理解成“这个页面共用的小型状态中心”。
-// 文件树、聊天区、右侧预览区都从这里拿状态，避免层层传 props。
+// This store acts as the shared page-level state center.
+// The file tree, chat lane, and inspector all read from this single source of truth.
 type WorkspaceStore = {
   //当前仓库根名称。
   repoRoot: string
-  //左侧文件树完整数据。
+  repoRootInput: string
   repoNodes: RepoNode[]
   //右侧当前正在预览的文件。
   openFile: RepoFile | null
@@ -40,7 +40,7 @@ type WorkspaceStore = {
   setBootstrapping: (value: boolean) => void
   setServerStatus: (status: ServerStatus) => void
   setErrorMessage: (message: string | null) => void
-  // 启动时把第一份仓库快照塞进 store。
+  setRepoRootInput: (value: string) => void
   bootstrapWorkspace: (payload: BootstrapPayload) => void
   // 打开文件预览
   openFilePreview: (file: RepoFile) => void
@@ -64,12 +64,13 @@ const starterMessage: WorkspaceMessage = {
   id: 'assistant-welcome',
   role: 'assistant',
   content:
-    'Welcome to Day 1 of AI Repo Assistant. Select a few files, ask a repo question, or request a mock code change to preview the diff flow.',
+    'Day 2 is connected to the real repository loader. Type a local repo path, load it, and then choose files for context.',
   createdAt: new Date().toISOString(),
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   repoRoot: '',
+  repoRootInput: '',
   repoNodes: [],
   openFile: null,
   selectedContextPaths: [],
@@ -84,13 +85,16 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   setBootstrapping: (value) => set({ isBootstrapping: value }),
   setServerStatus: (status) => set({ serverStatus: status }),
   setErrorMessage: (message) => set({ errorMessage: message }),
+  setRepoRootInput: (value) => set({ repoRootInput: value }),
   bootstrapWorkspace: ({ root, nodes, openFile }) =>
     set({
       repoRoot: root,
+      repoRootInput: root,
       repoNodes: nodes,
       openFile,
       selectedContextPaths: openFile ? [openFile.path] : [],
       inspectorMode: 'code',
+      diffPreview: null,
       errorMessage: null,
     }),
   openFilePreview: (file) =>

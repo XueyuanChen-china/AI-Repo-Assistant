@@ -1,18 +1,20 @@
-﻿import type { RepoNode } from '@ai-repo-assistant/shared'
+import type { RepoNode } from '@ai-repo-assistant/shared'
+
 import { PanelCard } from './PanelCard'
 
-type FileTreePanelProps = {
+type RepositoryPickerPanelProps = {
   repoRoot: string
   nodes: RepoNode[]
   activePath: string | null
   selectedContextPaths: string[]
   serverStatus: string
   isBootstrapping: boolean
+  onPickFolder: () => void
   onOpenFile: (path: string) => void
   onToggleContext: (path: string) => void
 }
 
-type FileTreeNodeProps = {
+type RepositoryTreeNodeProps = {
   node: RepoNode
   depth: number
   activePath: string | null
@@ -21,23 +23,21 @@ type FileTreeNodeProps = {
   onToggleContext: (path: string) => void
 }
 
-function FileTreeNode({
+function RepositoryTreeNode({
   node,
   depth,
   activePath,
   selectedContextPaths,
   onOpenFile,
   onToggleContext,
-}: FileTreeNodeProps) {
-  // 遇到目录就递归渲染子节点。
-  // 这是文件树组件最核心的思路：目录和文件都属于“节点”，只是展示方式不同。
+}: RepositoryTreeNodeProps) {
   if (node.type === 'directory') {
     return (
       <details className="tree-folder" open>
         <summary style={{ paddingLeft: `${depth * 14}px` }}>{node.name}</summary>
         <div className="tree-folder__children">
           {node.children?.map((child) => (
-            <FileTreeNode
+            <RepositoryTreeNode
               key={child.id}
               node={child}
               depth={depth + 1}
@@ -69,30 +69,43 @@ function FileTreeNode({
   )
 }
 
-export function FileTreePanel({
+export function RepositoryPickerPanel({
   repoRoot,
   nodes,
   activePath,
   selectedContextPaths,
   serverStatus,
   isBootstrapping,
+  onPickFolder,
   onOpenFile,
   onToggleContext,
-}: FileTreePanelProps) {
-  const subtitle = repoRoot ? `${repoRoot} · ${selectedContextPaths.length} 个上下文文件` : '无仓库加载'
+}: RepositoryPickerPanelProps) {
+  const subtitle = repoRoot
+    ? `${repoRoot} - ${selectedContextPaths.length} context file(s) selected`
+    : 'Pick a local folder to load a repository'
 
   return (
     <PanelCard
-      title="仓库"
+      title="Repository"
       subtitle={subtitle}
       actions={<span className={`status-pill status-pill--${serverStatus}`}>{serverStatus}</span>}
     >
-      {isBootstrapping ? <p className="panel-empty">正在加载仓库...</p> : null}
-      {!isBootstrapping && nodes.length === 0 ? <p className="panel-empty">仓库中没有文件</p> : null}
+      {/* The toolbar stays fixed at the top of the panel. Only the tree below should scroll. */}
+      <div className="repo-picker-toolbar">
+        <button className="repo-picker-toolbar__button" disabled={isBootstrapping} type="button" onClick={onPickFolder}>
+          {isBootstrapping ? 'Loading...' : 'Open Folder'}
+        </button>
+        <p className="repo-picker-toolbar__hint">Use the system folder picker so users do not have to paste a local path manually.</p>
+      </div>
+
+      {isBootstrapping ? <p className="panel-empty">Reading files from the selected folder...</p> : null}
+      {!isBootstrapping && nodes.length === 0 ? (
+        <p className="panel-empty">No previewable source files were found. Try another project folder.</p>
+      ) : null}
       {!isBootstrapping ? (
         <div className="tree-root">
           {nodes.map((node) => (
-            <FileTreeNode
+            <RepositoryTreeNode
               key={node.id}
               node={node}
               depth={0}

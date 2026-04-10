@@ -1,4 +1,4 @@
-﻿import { z } from 'zod'
+import { z } from 'zod'
 
 // shared 包只放“前后端都要认识”的数据结构。
 // 这样前端、后端都用同一套类型和校验规则，接口更不容易对不上。
@@ -27,7 +27,6 @@ export const repoNodeSchema: z.ZodType<RepoNode> = z.lazy(() =>
   }),
 )
 
-
 // 单个文件的内容，用在右侧代码预览面板。
 export const repoFileSchema = z.object({
   path: z.string(),
@@ -44,13 +43,25 @@ export const workspaceMessageSchema = z.object({
 })
 
 // diffPreview 是“修改建议预览”，不是实际落盘结果。
-// Day 1 先只做到让用户看前后差异，后面再接真实写文件。
+// Day 1 / Day 2 都先只做到让用户看前后差异，后面再接真实写文件。
 export const diffPreviewSchema = z.object({
   path: z.string(),
   title: z.string(),
   summary: z.string(),
   before: z.string(),
   after: z.string(),
+})
+
+// repo/tree 的查询参数。
+// root 允许为空：为空时后端会使用默认工作目录。
+export const repoTreeQuerySchema = z.object({
+  root: z.string().trim().optional(),
+})
+
+// repo/file 需要知道“仓库根目录 + 文件相对路径”，这样才能安全读取文件。
+export const repoFileQuerySchema = z.object({
+  root: z.string().min(1),
+  path: z.string().min(1),
 })
 
 // 下面这些 schema 对应后端接口的返回值 / 请求体。
@@ -61,6 +72,13 @@ export const repoTreeResponseSchema = z.object({
 
 export const repoFileResponseSchema = z.object({
   file: repoFileSchema,
+})
+// 健康检查接口的返回值，包含一些环境信息，帮助用户诊断问题。
+export const healthResponseSchema = z.object({
+  status: z.string(),
+  mode: z.string(),
+  timestamp: z.string(),
+  suggestedRoot: z.string(),
 })
 
 export const chatRequestSchema = z.object({
@@ -78,8 +96,11 @@ export const chatResponseSchema = z.object({
 export type RepoFile = z.infer<typeof repoFileSchema>
 export type WorkspaceMessage = z.infer<typeof workspaceMessageSchema>
 export type DiffPreview = z.infer<typeof diffPreviewSchema>
+export type RepoTreeQuery = z.infer<typeof repoTreeQuerySchema>
+export type RepoFileQuery = z.infer<typeof repoFileQuerySchema>
 export type RepoTreeResponse = z.infer<typeof repoTreeResponseSchema>
 export type RepoFileResponse = z.infer<typeof repoFileResponseSchema>
+export type HealthResponse = z.infer<typeof healthResponseSchema>
 export type ChatRequest = z.infer<typeof chatRequestSchema>
 export type ChatResponse = z.infer<typeof chatResponseSchema>
 
