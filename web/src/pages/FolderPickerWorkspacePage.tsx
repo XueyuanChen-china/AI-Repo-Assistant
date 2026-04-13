@@ -1,14 +1,14 @@
 import { useEffect } from 'react'
-import { chatResponseSchema, type WorkspaceMessage } from '@ai-repo-assistant/shared'
+import { type ChatContextMeta, type WorkspaceMessage } from '@ai-repo-assistant/shared'
 
 import { ChatPanel } from '../components/ChatPanel'
 import { InspectorPanel } from '../components/InspectorPanel'
 import { RepositoryPickerPanel } from '../components/RepositoryPickerPanel'
 import { WorkspaceSplitLayout } from '../components/WorkspaceSplitLayout'
+import { buildChatRequestPayload, sendChatRequest, streamChatRequest } from '../services/chatApi'
 import { pickLocalRepository, readSelectedRepoFile } from '../services/localRepoService'
 import { useWorkspaceStore } from '../store/useWorkspaceStore'
 
-// Small fetch helper for local API routes.
 async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
   const response = await fetch(input, init)
 
@@ -27,6 +27,21 @@ function buildErrorMessage(error: unknown) {
 
   return 'Unexpected error while talking to the local server.'
 }
+// 兜底处理，确保用户在请求失败时至少能看到一个错误消息，而不是完全没有反馈
+function createFallbackAssistantMessage(message: string): WorkspaceMessage {
+  return {
+    id: `assistant-error-${Date.now()}`,
+    role: 'assistant',
+    content: message,
+    createdAt: new Date().toISOString(),
+  }
+}
+//空的上下文元数
+const emptyContextMeta: ChatContextMeta = {
+  usedContextPaths: [],
+  truncatedPaths: [],
+  totalCharacters: 0,
+}
 
 export function FolderPickerWorkspacePage() {
   const repoRoot = useWorkspaceStore((state) => state.repoRoot)
@@ -37,6 +52,7 @@ export function FolderPickerWorkspacePage() {
   const draftMessage = useWorkspaceStore((state) => state.draftMessage)
   const inspectorMode = useWorkspaceStore((state) => state.inspectorMode)
   const diffPreview = useWorkspaceStore((state) => state.diffPreview)
+  const lastContextMeta = useWorkspaceStore((state) => state.lastContextMeta)
   const isBootstrapping = useWorkspaceStore((state) => state.isBootstrapping)
   const isSendingMessage = useWorkspaceStore((state) => state.isSendingMessage)
   const serverStatus = useWorkspaceStore((state) => state.serverStatus)
@@ -50,6 +66,8 @@ export function FolderPickerWorkspacePage() {
   const setDraftMessage = useWorkspaceStore((state) => state.setDraftMessage)
   const appendUserMessage = useWorkspaceStore((state) => state.appendUserMessage)
   const startSendingMessage = useWorkspaceStore((state) => state.startSendingMessage)
+  const beginAssistantStream = useWorkspaceStore((state) => state.beginAssistantStream)
+  const appendAssistantStreamChunk = useWorkspaceStore((state) => state.appendAssistantStreamChunk)
   const finishAssistantMessage = useWorkspaceStore((state) => state.finishAssistantMessage)
   const setInspectorMode = useWorkspaceStore((state) => state.setInspectorMode)
 
@@ -105,41 +123,85 @@ export function FolderPickerWorkspacePage() {
   }
 
   async function handleSendMessage() {
+    // 获取并修剪用户输入的消息
     const nextMessage = draftMessage.trim()
 
+    // 如果消息为空或正在发送消息，则返回
     if (!nextMessage || isSendingMessage) {
       return
     }
 
+    // 添加用户消息，清空草稿，标记为发送中状态
     appendUserMessage(nextMessage)
     setDraftMessage('')
     startSendingMessage()
+    setErrorMessage(null)
 
     try {
-      const payload = chatResponseSchema.parse(
-        await readJson('/api/chat', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: nextMessage,
-            selectedPaths: selectedContextPaths,
-          }),
-        }),
-      )
+      // 构建聊天请求负载
+      const payload = await buildChatRequestPayload(nextMessage, selectedContextPaths)
+      let hasReceivedStreamEvent = false
+      let hasCreatedAssistantDraft = false
+      let hasCompleted = false
 
-      finishAssistantMessage(payload.reply, payload.diffPreview ?? null)
-    } catch (error) {
-      const fallbackMessage: WorkspaceMessage = {
-        id: `assistant-error-${Date.now()}`,
-        role: 'assistant',
-        content: `The assistant could not answer because the request failed. ${buildErrorMessage(error)}`,
-        createdAt: new Date().toISOString(),
+      // 流式处理聊天响应
+      await streamChatRequest(payload, {
+        onEvent: (event) => {
+          hasReceivedStreamEvent = true
+
+          // 处理上下文事件
+          if (event.type === 'context') {
+            if (!hasCreatedAssistantDraft) {
+              beginAssistantStream(event.contextMeta)
+              hasCreatedAssistantDraft = true
+            }
+            return
+          }
+
+          // 处理内容块事件
+          if (event.type === 'chunk') {
+            if (!hasCreatedAssistantDraft) {
+              beginAssistantStream(emptyContextMeta)
+              hasCreatedAssistantDraft = true
+            }
+            appendAssistantStreamChunk(event.content)
+            return
+          }
+
+          // 处理完成事件
+          if (event.type === 'done') {
+            finishAssistantMessage(event.reply, event.diffPreview ?? null, event.contextMeta)
+            hasCompleted = true
+            return
+          }
+
+          // 未知事件类型，抛出错误
+          throw new Error(event.message)
+        },
+      })
+
+      // 验证流是否正确完成
+      if (!hasCompleted) {
+        throw new Error('The stream ended before a final assistant message was received.')
       }
+    } catch (error) {
+      // 主请求失败，尝试备用请求
+      const primaryError = buildErrorMessage(error)
 
-      finishAssistantMessage(fallbackMessage, null)
-      setErrorMessage(buildErrorMessage(error))
+      try {
+        const payload = await buildChatRequestPayload(nextMessage, selectedContextPaths)
+        const fallback = await sendChatRequest(payload)
+        finishAssistantMessage(fallback.reply, fallback.diffPreview ?? null, fallback.contextMeta)
+      } catch (fallbackError) {
+        // 备用请求也失败，使用降级消息
+        const finalError = buildErrorMessage(fallbackError)
+        finishAssistantMessage(
+          createFallbackAssistantMessage(`The assistant request failed. ${primaryError}. Fallback also failed: ${finalError}`),
+          null,
+          emptyContextMeta,
+        )
+        setErrorMessage(finalError)
+      }
     }
   }
 
@@ -163,8 +225,6 @@ export function FolderPickerWorkspacePage() {
 
       {errorMessage ? <div className="workspace-alert">{errorMessage}</div> : null}
 
-      {/* The main workspace fills the remaining viewport height.
-          Each panel inside the split layout keeps its own scroll area. */}
       <main className="workspace-main">
         <WorkspaceSplitLayout
           left={
@@ -185,6 +245,7 @@ export function FolderPickerWorkspacePage() {
               messages={messages}
               draftMessage={draftMessage}
               selectedContextPaths={selectedContextPaths}
+              lastContextMeta={lastContextMeta}
               isSendingMessage={isSendingMessage}
               onDraftChange={setDraftMessage}
               onSend={handleSendMessage}

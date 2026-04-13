@@ -1,18 +1,22 @@
 import { type PointerEvent as ReactPointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 
+// 工作区分割布局的属性类型
 type WorkspaceSplitLayoutProps = {
   left: ReactNode
   center: ReactNode
   right: ReactNode
 }
 
+// 面板位置类型
 type PanelSide = 'left' | 'right'
 
+// 布局宽度类型
 type LayoutWidths = {
   left: number
   right: number
 }
 
+// 拖拽状态类型
 type DragState = {
   side: PanelSide
   startX: number
@@ -20,20 +24,26 @@ type DragState = {
   startRightWidth: number
 }
 
+// 持久化存储的键名
 const STORAGE_KEY = 'ai-repo-assistant.workspace-layout'
+// 分割条宽度
 const SPLITTER_WIDTH = 10
+// 默认宽度
 const DEFAULT_WIDTHS: LayoutWidths = {
   left: 280,
   right: 420,
 }
+// 最小宽度限制
 const MIN_LEFT_WIDTH = 220
 const MIN_CENTER_WIDTH = 320
 const MIN_RIGHT_WIDTH = 280
 
+// 限制数值在指定范围内
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max)
 }
 
+// 从本地存储读取已保存的宽度配置
 function readStoredWidths() {
   if (typeof window === 'undefined') {
     return DEFAULT_WIDTHS
@@ -55,31 +65,20 @@ function readStoredWidths() {
       }
     }
   } catch {
-    // Layout persistence is optional. If localStorage fails, the UI still works with defaults.
+    // 布局持久化是可选的。如果 localStorage 失败，UI 仍会使用默认值工作
   }
 
   return DEFAULT_WIDTHS
 }
 
-// This helper keeps the left and right panels within sensible bounds,
-// and protects the center panel from being squeezed too far.
+// 此辅助函数保持左右面板在合理范围内，
+// 并防止中间面板被压缩得过小
 function normalizeWidths(widths: LayoutWidths, containerWidth: number) {
   const availableWidth = Math.max(containerWidth - SPLITTER_WIDTH * 2, 0)
   const minimumTotalWidth = MIN_LEFT_WIDTH + MIN_CENTER_WIDTH + MIN_RIGHT_WIDTH
 
-  if (availableWidth <= minimumTotalWidth) {
-    const centerWidth = Math.min(MIN_CENTER_WIDTH, Math.max(Math.floor(availableWidth * 0.42), 240))
-    const sideWidth = Math.max(availableWidth - centerWidth, 0)
-    const sideTotal = widths.left + widths.right || DEFAULT_WIDTHS.left + DEFAULT_WIDTHS.right
-    const leftRatio = sideTotal > 0 ? widths.left / sideTotal : 0.4
-    const nextLeft = Math.round(sideWidth * leftRatio)
 
-    return {
-      left: Math.max(nextLeft, 0),
-      right: Math.max(sideWidth - nextLeft, 0),
-    }
-  }
-
+  // 正常情况下的宽度计算
   const maxSideWidth = availableWidth - MIN_CENTER_WIDTH
   const maxLeftWidth = maxSideWidth - MIN_RIGHT_WIDTH
   const nextLeft = clamp(widths.left, MIN_LEFT_WIDTH, maxLeftWidth)
@@ -95,16 +94,19 @@ function normalizeWidths(widths: LayoutWidths, containerWidth: number) {
 export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayoutProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const dragStateRef = useRef<DragState | null>(null)
+  // 初始化宽度状态
   const [widths, setWidths] = useState<LayoutWidths>(() => readStoredWidths())
 
+  // 当宽度变化时持久化到本地存储
   useEffect(() => {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(widths))
     } catch {
-      // Persisting widths is just a bonus and should never block rendering.
+      // 持久化宽度只是额外功能，不应阻止渲染
     }
   }, [widths])
 
+  // 监听窗口大小变化，重新计算和规范化布局宽度,确保
   useEffect(() => {
     function syncWidthsToContainer() {
       const containerWidth = containerRef.current?.clientWidth ?? 0
@@ -124,6 +126,7 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
     }
   }, [])
 
+  // 处理分割条拖拽事件
   useEffect(() => {
     function handlePointerMove(event: PointerEvent) {
       const dragState = dragStateRef.current
@@ -133,8 +136,10 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
         return
       }
 
+      // 计算指针移动的距离
       const deltaX = event.clientX - dragState.startX
 
+      // 根据拖拽的分割条更新左或右面板的宽度
       if (dragState.side === 'left') {
         setWidths(
           normalizeWidths(
@@ -159,12 +164,14 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
       )
     }
 
+    // 停止拖拽
     function stopDragging() {
       dragStateRef.current = null
       document.body.classList.remove('is-resizing-panels')
     }
-
+    //拖拽移动
     window.addEventListener('pointermove', handlePointerMove)
+    
     window.addEventListener('pointerup', stopDragging)
     window.addEventListener('pointercancel', stopDragging)
 
@@ -175,6 +182,7 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
     }
   }, [])
 
+  // 开始拖拽分割条
   function startDragging(side: PanelSide, event: ReactPointerEvent<HTMLDivElement>) {
     const containerWidth = containerRef.current?.clientWidth ?? 0
 
@@ -189,15 +197,18 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
       startRightWidth: widths.right,
     }
 
+    // 添加视觉反馈：显示正在调整大小
     document.body.classList.add('is-resizing-panels')
   }
 
   return (
     <div ref={containerRef} className="workspace-grid">
+      {/* 左侧面板 */}
       <div className="workspace-column workspace-column--left" style={{ width: `${widths.left}px` }}>
         {left}
       </div>
 
+      {/* 左侧分割条 */}
       <div
         aria-label="Resize repository panel"
         className="workspace-splitter"
@@ -206,8 +217,10 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
         onPointerDown={(event) => startDragging('left', event)}
       />
 
+      {/* 中间面板 */}
       <div className="workspace-column workspace-column--center">{center}</div>
 
+      {/* 右侧分割条 */}
       <div
         aria-label="Resize inspector panel"
         className="workspace-splitter"
@@ -216,6 +229,7 @@ export function WorkspaceSplitLayout({ left, center, right }: WorkspaceSplitLayo
         onPointerDown={(event) => startDragging('right', event)}
       />
 
+      {/* 右侧面板 */}
       <div className="workspace-column workspace-column--right" style={{ width: `${widths.right}px` }}>
         {right}
       </div>

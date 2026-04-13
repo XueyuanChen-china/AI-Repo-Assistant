@@ -1,10 +1,5 @@
 import { z } from 'zod'
 
-// shared 包只放“前后端都要认识”的数据结构。
-// 这样前端、后端都用同一套类型和校验规则，接口更不容易对不上。
-
-// RepoNode 描述左侧文件树里的一个节点。
-// 它既可以是目录，也可以是文件；目录下可以继续套 children。
 export type RepoNode = {
   id: string
   name: string
@@ -14,8 +9,6 @@ export type RepoNode = {
   children?: RepoNode[]
 }
 
-// zod schema 的作用是“运行时校验”。
-// TypeScript 只能在写代码时帮你检查类型，真正收到接口数据时还需要 schema 再兜一层。
 export const repoNodeSchema: z.ZodType<RepoNode> = z.lazy(() =>
   z.object({
     id: z.string(),
@@ -27,14 +20,12 @@ export const repoNodeSchema: z.ZodType<RepoNode> = z.lazy(() =>
   }),
 )
 
-// 单个文件的内容，用在右侧代码预览面板。
 export const repoFileSchema = z.object({
   path: z.string(),
   language: z.string(),
   content: z.string(),
 })
 
-// 聊天消息结构，用在中间对话区。
 export const workspaceMessageSchema = z.object({
   id: z.string(),
   role: z.enum(['user', 'assistant']),
@@ -42,8 +33,6 @@ export const workspaceMessageSchema = z.object({
   createdAt: z.string(),
 })
 
-// diffPreview 是“修改建议预览”，不是实际落盘结果。
-// Day 1 / Day 2 都先只做到让用户看前后差异，后面再接真实写文件。
 export const diffPreviewSchema = z.object({
   path: z.string(),
   title: z.string(),
@@ -52,19 +41,15 @@ export const diffPreviewSchema = z.object({
   after: z.string(),
 })
 
-// repo/tree 的查询参数。
-// root 允许为空：为空时后端会使用默认工作目录。
 export const repoTreeQuerySchema = z.object({
   root: z.string().trim().optional(),
 })
 
-// repo/file 需要知道“仓库根目录 + 文件相对路径”，这样才能安全读取文件。
 export const repoFileQuerySchema = z.object({
   root: z.string().min(1),
   path: z.string().min(1),
 })
 
-// 下面这些 schema 对应后端接口的返回值 / 请求体。
 export const repoTreeResponseSchema = z.object({
   root: z.string(),
   nodes: z.array(repoNodeSchema),
@@ -73,7 +58,7 @@ export const repoTreeResponseSchema = z.object({
 export const repoFileResponseSchema = z.object({
   file: repoFileSchema,
 })
-// 健康检查接口的返回值，包含一些环境信息，帮助用户诊断问题。
+
 export const healthResponseSchema = z.object({
   status: z.string(),
   mode: z.string(),
@@ -81,18 +66,72 @@ export const healthResponseSchema = z.object({
   suggestedRoot: z.string(),
 })
 
+// The web app now sends the actual selected file contents to the server,
+// because the current repository workflow is browser-driven instead of server-driven.
+export const selectedContextFileSchema = z.object({
+  path: z.string(),
+  language: z.string(),
+  content: z.string(),
+})
+
+/**
+ * 聊天上下文元数据的 Zod 验证模式
+ * 
+ * @typedef {Object} ChatContextMeta
+ * @property {string[]} usedContextPaths - 已使用的上下文文件路径数组
+ * @property {string[]} truncatedPaths - 被截断的文件路径数组
+ * @property {number} totalCharacters - 上下文中的总字符数（非负整数）
+ * 
+ * @remarks
+ * 用于验证和类型化聊天请求中的上下文元数据信息
+ */
+export const chatContextMetaSchema = z.object({
+  usedContextPaths: z.array(z.string()),
+  truncatedPaths: z.array(z.string()),
+  totalCharacters: z.number().int().nonnegative(),
+})
+
 export const chatRequestSchema = z.object({
   message: z.string().min(1),
   selectedPaths: z.array(z.string()),
+  contextFiles: z.array(selectedContextFileSchema).max(5).default([]),
 })
 
 export const chatResponseSchema = z.object({
   reply: workspaceMessageSchema,
   diffPreview: diffPreviewSchema.nullish(),
+  contextMeta: chatContextMetaSchema,
 })
 
-// 这些 type 是从 schema 反推出的 TS 类型。
-// 好处是“类型定义”和“运行时校验”只维护一份，不容易写两套后不一致。
+export const chatStreamContextEventSchema = z.object({
+  type: z.literal('context'),
+  contextMeta: chatContextMetaSchema,
+})
+
+export const chatStreamChunkEventSchema = z.object({
+  type: z.literal('chunk'),
+  content: z.string(),
+})
+
+export const chatStreamDoneEventSchema = z.object({
+  type: z.literal('done'),
+  reply: workspaceMessageSchema,
+  diffPreview: diffPreviewSchema.nullish(),
+  contextMeta: chatContextMetaSchema,
+})
+
+export const chatStreamErrorEventSchema = z.object({
+  type: z.literal('error'),
+  message: z.string(),
+})
+
+export const chatStreamEventSchema = z.discriminatedUnion('type', [
+  chatStreamContextEventSchema,
+  chatStreamChunkEventSchema,
+  chatStreamDoneEventSchema,
+  chatStreamErrorEventSchema,
+])
+
 export type RepoFile = z.infer<typeof repoFileSchema>
 export type WorkspaceMessage = z.infer<typeof workspaceMessageSchema>
 export type DiffPreview = z.infer<typeof diffPreviewSchema>
@@ -101,8 +140,10 @@ export type RepoFileQuery = z.infer<typeof repoFileQuerySchema>
 export type RepoTreeResponse = z.infer<typeof repoTreeResponseSchema>
 export type RepoFileResponse = z.infer<typeof repoFileResponseSchema>
 export type HealthResponse = z.infer<typeof healthResponseSchema>
+export type SelectedContextFile = z.infer<typeof selectedContextFileSchema>
+export type ChatContextMeta = z.infer<typeof chatContextMetaSchema>
 export type ChatRequest = z.infer<typeof chatRequestSchema>
 export type ChatResponse = z.infer<typeof chatResponseSchema>
+export type ChatStreamEvent = z.infer<typeof chatStreamEventSchema>
 
-// 右侧检查面板目前有两个模式：看代码，或者看 diff。
 export type InspectorMode = 'code' | 'diff'

@@ -1,10 +1,7 @@
-﻿import type { ChatRequest, ChatResponse, DiffPreview, RepoFile, RepoNode } from '@ai-repo-assistant/shared'
+import type { ChatRequest, ChatResponse, DiffPreview, RepoFile, RepoNode } from '@ai-repo-assistant/shared'
 
-// Day 1 用固定的内存数据模拟一个小仓库。
-// 这样我们先把 UI、接口、数据流跑通，再逐步换成真实仓库读取能力。
 export const mockRepoRoot = 'demo-repo'
 
-// 这份数据控制左侧文件树长什么样。
 export const mockRepoNodes: RepoNode[] = [
   {
     id: 'src',
@@ -75,8 +72,6 @@ export const mockRepoNodes: RepoNode[] = [
   },
 ]
 
-// loginBefore / loginAfter 是一对“修改前 / 修改后”的样例。
-// 右侧 diff 预览和聊天返回的 mock 建议都会复用这两份文本。
 const loginBefore = `import { useState } from 'react'
 import { login } from '../lib/apiClient'
 
@@ -137,7 +132,6 @@ export function LoginPage() {
 }
 `
 
-// 这份 map 控制“某个 path 对应什么文件内容”。
 export const mockRepoFiles: Record<string, RepoFile> = {
   'src/pages/LoginPage.tsx': {
     path: 'src/pages/LoginPage.tsx',
@@ -220,12 +214,10 @@ export async function login(payload: LoginPayload) {
   },
 }
 
-// 根据 path 取文件内容，给 /api/repo/file 用。
-export function getMockFile(path: string) {
-  return mockRepoFiles[path] ?? null
+export function getMockFile(filePath: string) {
+  return mockRepoFiles[filePath] ?? null
 }
 
-// 找到树里的第一个文件，让前端启动后能默认打开一个文件。
 export function findFirstFilePath(nodes: RepoNode[]): string | null {
   for (const node of nodes) {
     if (node.type === 'file') {
@@ -243,7 +235,6 @@ export function findFirstFilePath(nodes: RepoNode[]): string | null {
   return null
 }
 
-// 生成固定的 diff 预览数据，给右侧 Diff 面板演示用。
 export function buildMockDiffPreview(): DiffPreview {
   return {
     path: 'src/pages/LoginPage.tsx',
@@ -254,8 +245,6 @@ export function buildMockDiffPreview(): DiffPreview {
   }
 }
 
-// 这里模拟“AI 回答”这件事。
-// 真正接模型之后，大概率还是保留同样的输入输出结构，只是把中间实现替换掉。
 export function buildMockChatResponse(input: ChatRequest): ChatResponse {
   const now = new Date().toISOString()
   const selectedContext =
@@ -277,5 +266,10 @@ export function buildMockChatResponse(input: ChatRequest): ChatResponse {
       createdAt: now,
     },
     diffPreview: shouldSuggestDiff ? buildMockDiffPreview() : null,
+    contextMeta: {
+      usedContextPaths: input.selectedPaths,
+      truncatedPaths: [],
+      totalCharacters: 0,
+    },
   }
 }

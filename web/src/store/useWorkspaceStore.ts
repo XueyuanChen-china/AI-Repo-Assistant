@@ -1,4 +1,11 @@
-import type { DiffPreview, InspectorMode, RepoFile, RepoNode, WorkspaceMessage } from '@ai-repo-assistant/shared'
+import type {
+  ChatContextMeta,
+  DiffPreview,
+  InspectorMode,
+  RepoFile,
+  RepoNode,
+  WorkspaceMessage,
+} from '@ai-repo-assistant/shared'
 import { create } from 'zustand'
 
 type ServerStatus = 'checking' | 'online' | 'offline'
@@ -9,62 +16,43 @@ type BootstrapPayload = {
   openFile: RepoFile | null
 }
 
-// This store acts as the shared page-level state center.
-// The file tree, chat lane, and inspector all read from this single source of truth.
 type WorkspaceStore = {
-  //当前仓库根名称。
   repoRoot: string
   repoRootInput: string
   repoNodes: RepoNode[]
-  //右侧当前正在预览的文件。
   openFile: RepoFile | null
-  //当前被勾选进 AI 上下文的文件路径列表。
   selectedContextPaths: string[]
-  //中间聊天区的消息列表。
   messages: WorkspaceMessage[]
-  //输入框里当前还没发出去的草稿内容。
   draftMessage: string
-  //右侧预览面板当前的模式，是在看代码还是看 diff。
   inspectorMode: InspectorMode
-  // 当前 diff 预览的数据，null 代表没有正在看的 diff。
   diffPreview: DiffPreview | null
-  // 启动流程相关的状态，主要是为了控制界面上显示“正在启动中...”的提示。
+  lastContextMeta: ChatContextMeta | null
   isBootstrapping: boolean
-  // 发送消息相关的状态
   isSendingMessage: boolean
-  // 后端服务器的状态，决定了用户能不能正常使用这个工具。
+  streamingAssistantId: string | null
   serverStatus: ServerStatus
-  // 发生错误时的错误信息，用来展示给用户。
   errorMessage: string | null
-  // 一系列修改状态的方法，组件里调用这些方法来修改状态，而不是直接 set。
   setBootstrapping: (value: boolean) => void
   setServerStatus: (status: ServerStatus) => void
   setErrorMessage: (message: string | null) => void
   setRepoRootInput: (value: string) => void
   bootstrapWorkspace: (payload: BootstrapPayload) => void
-  // 打开文件预览
   openFilePreview: (file: RepoFile) => void
-  // 上下文文件最多保留 5 个，模拟后面真实模型会遇到的上下文预算问题。
   toggleContextPath: (path: string) => void
-  // 修改输入框草稿内容。
   setDraftMessage: (value: string) => void
-  // 追加一条用户消息到消息列表里。
   appendUserMessage: (content: string) => void
-  // 发送消息相关的状态修改方法，控制发送流程和结果。
   startSendingMessage: () => void
-  // 收到 AI 回复后，把消息追加到消息列表里，如果有 diff 预览数据也一起塞进去。
-  finishAssistantMessage: (message: WorkspaceMessage, diffPreview?: DiffPreview | null) => void
-  // 切换右侧预览面板的模式。
+  beginAssistantStream: (contextMeta: ChatContextMeta) => void
+  appendAssistantStreamChunk: (chunk: string) => void
+  finishAssistantMessage: (message: WorkspaceMessage, diffPreview?: DiffPreview | null, contextMeta?: ChatContextMeta | null) => void
   setInspectorMode: (mode: InspectorMode) => void
-  // 关闭 diff 预览，回到代码预览模式。
   clearDiffPreview: () => void
 }
 
 const starterMessage: WorkspaceMessage = {
   id: 'assistant-welcome',
   role: 'assistant',
-  content:
-    'Day 2 is connected to the real repository loader. Type a local repo path, load it, and then choose files for context.',
+  content: 'Day 3 can answer questions using the files you selected as context.',
   createdAt: new Date().toISOString(),
 }
 
@@ -78,14 +66,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   draftMessage: '',
   inspectorMode: 'code',
   diffPreview: null,
+  // 最新一次对话使用的上下文元数据
+  lastContextMeta: null,
   isBootstrapping: false,
   isSendingMessage: false,
+  // 正在流式传输的助手消息ID，用于在消息列表中找到对应消息并追加内容
+  streamingAssistantId: null,
   serverStatus: 'checking',
   errorMessage: null,
+  // 设置正在启动状态
   setBootstrapping: (value) => set({ isBootstrapping: value }),
+  // 设置服务器状态
   setServerStatus: (status) => set({ serverStatus: status }),
+  // 设置错误信息
   setErrorMessage: (message) => set({ errorMessage: message }),
+  // 设置仓库根目录输入值
   setRepoRootInput: (value) => set({ repoRootInput: value }),
+  // 初始化工作区
   bootstrapWorkspace: ({ root, nodes, openFile }) =>
     set({
       repoRoot: root,
@@ -95,14 +92,17 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
       selectedContextPaths: openFile ? [openFile.path] : [],
       inspectorMode: 'code',
       diffPreview: null,
+      lastContextMeta: null,
       errorMessage: null,
     }),
+  // 打开文件预览
   openFilePreview: (file) =>
     set({
       openFile: file,
       inspectorMode: 'code',
       errorMessage: null,
     }),
+  // 切换上下文文件路径选中状态
   toggleContextPath: (path) =>
     set((state) => {
       const isSelected = state.selectedContextPaths.includes(path)
@@ -113,7 +113,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
           : [...state.selectedContextPaths.slice(-4), path],
       }
     }),
+  // 设置草稿消息
   setDraftMessage: (value) => set({ draftMessage: value }),
+  // 添加用户消息
   appendUserMessage: (content) =>
     set((state) => ({
       messages: [
@@ -126,15 +128,69 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         },
       ],
     })),
-  startSendingMessage: () => set({ isSendingMessage: true }),
-  finishAssistantMessage: (message, diffPreview) =>
-    set((state) => ({
-      messages: [...state.messages, message],
-      diffPreview: diffPreview ?? null,
-      inspectorMode: diffPreview ? 'diff' : state.inspectorMode,
-      isSendingMessage: false,
-    })),
+  // 开始发送消息
+  startSendingMessage: () =>
+    set({
+      isSendingMessage: true,
+      lastContextMeta: null,
+      streamingAssistantId: null,
+    }),
+  // 开始助手流式响应
+  beginAssistantStream: (contextMeta) =>
+    set((state) => {
+      const assistantId = `assistant-stream-${Date.now()}`
+
+      return {
+        lastContextMeta: contextMeta,
+        streamingAssistantId: assistantId,
+        messages: [
+          ...state.messages,
+          {
+            id: assistantId,
+            role: 'assistant',
+            content: '',
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      }
+    }),
+  // 追加助手流式响应内容
+  appendAssistantStreamChunk: (chunk) =>
+    set((state) => {
+      if (!state.streamingAssistantId) {
+        return state
+      }
+
+      return {
+        messages: state.messages.map((message) =>
+          message.id === state.streamingAssistantId
+            ? {
+              ...message,
+              content: `${message.content}${chunk}`,
+            }
+            : message,
+        ),
+      }
+    }),
+  // 完成助手消息
+  finishAssistantMessage: (message, diffPreview, contextMeta) =>
+    set((state) => {
+      const nextMessages = state.streamingAssistantId
+        ? state.messages.map((item) => (item.id === state.streamingAssistantId ? message : item))
+        : [...state.messages, message]
+
+      return {
+        messages: nextMessages,
+        diffPreview: diffPreview ?? null,
+        inspectorMode: diffPreview ? 'diff' : state.inspectorMode,
+        isSendingMessage: false,
+        streamingAssistantId: null,
+        lastContextMeta: contextMeta ?? state.lastContextMeta,
+      }
+    }),
+  // 设置检查器模式
   setInspectorMode: (mode) => set({ inspectorMode: mode }),
+  // 清除差异预览
   clearDiffPreview: () =>
     set((state) => ({
       diffPreview: null,
