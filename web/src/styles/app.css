@@ -156,7 +156,7 @@ button {
   flex: 1 1 auto;
 }
 
-.workspace-column > .panel-card {
+.workspace-column>.panel-card {
   flex: 1 1 auto;
 }
 
@@ -300,7 +300,7 @@ button {
   margin-bottom: 8px;
 }
 
-.tree-folder > summary {
+.tree-folder>summary {
   cursor: pointer;
   color: #d7e2ff;
   margin-bottom: 8px;
@@ -509,11 +509,87 @@ button {
   flex: 1 1 auto;
 }
 
-.diff-grid > section {
+.diff-grid>section {
   min-height: 0;
   display: flex;
   flex-direction: column;
 }
+
+.suggestion-switcher {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+
+.suggestion-switcher button {
+  border: 1px solid rgba(174, 198, 255, 0.14);
+  border-radius: 10px;
+  padding: 8px 10px;
+  background: rgba(16, 27, 48, 0.68);
+  color: #d7e2ff;
+}
+
+.suggestion-switcher .is-active {
+  border-color: rgba(116, 154, 255, 0.52);
+  background: rgba(30, 46, 79, 0.88);
+}
+
+/* Diff action buttons */
+.diff-actions {
+  display: flex;
+  gap: 12px;
+  flex-shrink: 0;
+  padding-top: 8px;
+}
+
+.btn-apply {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 18px;
+  background: linear-gradient(135deg, #4dff91, #2fb7b0);
+  color: #04101d;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.btn-apply:hover {
+  box-shadow: 0 4px 12px rgba(77, 255, 145, 0.3);
+}
+
+.btn-discard {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 18px;
+  background: rgba(255, 100, 100, 0.2);
+  border: 1px solid rgba(255, 100, 100, 0.4);
+  color: #ffb8b8;
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.btn-discard:hover {
+  background: rgba(255, 100, 100, 0.3);
+}
+
+/* Applied status indicator */
+.suggestion-applied {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: rgba(77, 255, 145, 0.1);
+  border: 1px solid rgba(77, 255, 145, 0.2);
+  color: #91f0ca;
+  font-size: 0.85rem;
+}
+
+.checkmark {
+  font-size: 1.1rem;
+}
+
+/* Context meta display */
 
 /* Right panel scroll area.
    Code and diff blocks take the remaining height and scroll internally. */
@@ -535,6 +611,59 @@ button {
 
 .code-block--after {
   border-color: rgba(74, 215, 164, 0.22);
+}
+
+/* Diff Line Highlighting */
+.code-block--diff {
+  padding: 0;
+}
+
+.diff-line {
+  display: flex;
+  padding: 0 12px;
+  line-height: 1.6;
+  position: relative;
+}
+
+.diff-line__number {
+  width: 40px;
+  flex-shrink: 0;
+  color: #6c7d9e;
+  font-size: 0.75rem;
+  border-right: 1px solid rgba(255, 255, 255, 0.05);
+  margin-right: 12px;
+  text-align: right;
+  padding-right: 8px;
+  user-select: none;
+}
+
+.diff-line__content {
+  flex: 1;
+  white-space: pre;
+}
+
+.diff-line--added {
+  background-color: rgba(46, 160, 67, 0.15);
+  border-left: 3px solid #3fb950;
+}
+
+.diff-line--added .diff-line__content::before {
+  content: '+ ';
+  color: #3fb950;
+  position: absolute;
+  margin-left: -14px;
+}
+
+.diff-line--removed {
+  background-color: rgba(248, 81, 73, 0.15);
+  border-left: 3px solid #f85149;
+}
+
+.diff-line--removed .diff-line__content::before {
+  content: '- ';
+  color: #f85149;
+  position: absolute;
+  margin-left: -14px;
 }
 
 @media (max-width: 980px) {

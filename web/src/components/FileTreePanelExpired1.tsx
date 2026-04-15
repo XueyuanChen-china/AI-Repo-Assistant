@@ -1,4 +1,4 @@
-﻿import type { RepoNode } from '@ai-repo-assistant/shared'
+import type { RepoNode } from '@ai-repo-assistant/shared'
 
 import { PanelCard } from './PanelCard'
 
@@ -25,6 +25,7 @@ type FileTreeNodeProps = {
   onToggleContext: (path: string) => void
 }
 
+// 旧版文件树节点组件，保留作参考用。
 function FileTreeNode({
   node,
   depth,
@@ -33,8 +34,6 @@ function FileTreeNode({
   onOpenFile,
   onToggleContext,
 }: FileTreeNodeProps) {
-  // 遇到目录就递归渲染子节点。
-  // 这是文件树组件最核心的思路：目录和文件都属于“节点”，只是展示方式不同。
   if (node.type === 'directory') {
     return (
       <details className="tree-folder" open>
@@ -73,6 +72,7 @@ function FileTreeNode({
   )
 }
 
+// 旧版文件树面板，走的是“输入仓库路径 + 后端读仓库”的方案。
 export function FileTreePanel({
   repoRoot,
   repoRootInput,

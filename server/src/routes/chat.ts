@@ -60,7 +60,8 @@ export async function registerChatRoutes(app: FastifyInstance) {
       writeSseEvent(rawResponse, {
         type: 'done',
         reply: result.reply,
-        diffPreview: result.diffPreview ?? null,
+        diffPreviews: result.diffPreviews,
+        pendingSuggestions: result.pendingSuggestions,
         contextMeta: result.contextMeta,
       })
     } catch (error) {

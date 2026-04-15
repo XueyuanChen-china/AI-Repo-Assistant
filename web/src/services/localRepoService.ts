@@ -92,6 +92,10 @@ const languageByExtension: Record<string, string> = {
 const maxFileSizeBytes = 256 * 1024
 const selectedFiles = new Map<string, FileLike>()
 
+function normalizeRepoPath(filePath: string) {
+  return filePath.replace(/\\/g, '/').toLowerCase()
+}
+
 function inferLanguage(fileName: string) {
   const dotIndex = fileName.lastIndexOf('.')
   const extension = dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : ''
@@ -197,6 +201,48 @@ async function toFile(fileLike: FileLike) {
   }
 
   return fileLike.getFile()
+}
+
+function canWriteFile(fileLike: FileLike): fileLike is FileSystemFileHandle {
+  return !(fileLike instanceof File) && typeof fileLike.createWritable === 'function'
+}
+
+function resolveStoredFilePath(requestedPath: string) {
+  if (selectedFiles.has(requestedPath)) {
+    return requestedPath
+  }
+
+  const normalizedTarget = normalizeRepoPath(requestedPath)
+  const targetBaseName = normalizedTarget.split('/').pop()
+  let suffixMatch: string | null = null
+  const basenameMatches: string[] = []
+
+  for (const storedPath of selectedFiles.keys()) {
+    const normalizedStoredPath = normalizeRepoPath(storedPath)
+
+    if (
+      normalizedStoredPath.endsWith(normalizedTarget) ||
+      normalizedTarget.endsWith(normalizedStoredPath)
+    ) {
+      suffixMatch = storedPath
+      break
+    }
+
+    const storedBaseName = normalizedStoredPath.split('/').pop()
+    if (targetBaseName && storedBaseName === targetBaseName) {
+      basenameMatches.push(storedPath)
+    }
+  }
+
+  if (suffixMatch) {
+    return suffixMatch
+  }
+
+  if (basenameMatches.length === 1) {
+    return basenameMatches[0]
+  }
+
+  return null
 }
 
 async function buildSnapshot(rootName: string, nodes: RepoNode[]) {
@@ -326,28 +372,61 @@ export async function pickLocalRepository() {
   return pickWithInputElement()
 }
 
-// 导出函数：读取选中的仓库文件
 export async function readSelectedRepoFile(filePath: string): Promise<RepoFile> {
-  // 从缓存的文件映射中获取文件
-  const fileLike = selectedFiles.get(filePath)
+  const resolvedPath = resolveStoredFilePath(filePath)
+  const fileLike = resolvedPath ? selectedFiles.get(resolvedPath) : null
 
-  // 如果文件不存在于缓存中，抛出错误
   if (!fileLike) {
     throw new Error(`The selected file could not be found in memory: ${filePath}`)
   }
 
-  // 将文件句柄转换为 File 对象
   const file = await toFile(fileLike)
 
-  // 检查文件大小是否超过限制
   if (file.size > maxFileSizeBytes) {
     throw new Error(`File is too large. The current version only previews files up to ${Math.floor(maxFileSizeBytes / 1024)}KB.`)
   }
 
-  // 返回包含文件路径、编程语言和内容的对象
   return {
-    path: filePath,
+    path: resolvedPath ?? filePath,
     language: inferLanguage(file.name),
     content: await file.text(),
+  }
+}
+
+/**
+ * 审批通过后，优先直接使用浏览器保存的文件句柄回写内容。
+ * 这和当前“前端选择文件夹”的主流程是一致的，也能避免把虚拟仓库名误当成后端绝对路径。
+ */
+export async function writeSelectedRepoFile(filePath: string, nextContent: string): Promise<RepoFile> {
+  // 根据请求的文件路径解析出实际存储的文件路径
+  const resolvedPath = resolveStoredFilePath(filePath)
+  // 从已选择的文件映射中获取对应的文件句柄或File对象
+  const fileLike = resolvedPath ? selectedFiles.get(resolvedPath) : null
+
+  // 如果文件不存在，抛出错误
+  if (!fileLike) {
+    throw new Error(`The selected file could not be found in memory: ${filePath}`)
+  }
+
+  // 检查文件句柄是否支持写入操作
+  if (!canWriteFile(fileLike)) {
+    throw new Error('The current folder selection mode is read-only. Please use the native folder picker to allow write access.')
+  }
+
+  // 创建一个可写流用于写入文件内容
+  const writable = await fileLike.createWritable()
+  // 将新内容写入文件
+  await writable.write(nextContent)
+  // 关闭写入流
+  await writable.close()
+
+  // 重新读取更新后的文件
+  const updatedFile = await fileLike.getFile()
+
+  // 返回包含更新文件信息的RepoFile对象
+  return {
+    path: resolvedPath ?? filePath,
+    language: inferLanguage(updatedFile.name),
+    content: await updatedFile.text(),
   }
 }

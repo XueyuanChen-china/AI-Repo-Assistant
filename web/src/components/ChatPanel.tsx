@@ -12,6 +12,9 @@ type ChatPanelProps = {
   onSend: () => void
 }
 
+const diffPromptExample =
+  '示例：请直接给出可应用的完整代码修改建议；如果需要改多个文件，请为每个文件分别返回完整文件内容。'
+
 function formatMessageTime(createdAt: string) {
   return new Intl.DateTimeFormat('zh-CN', {
     hour: '2-digit',
@@ -93,12 +96,12 @@ export function ChatPanel({
       >
         <textarea
           rows={4}
-          placeholder="请求示例：‘这个仓库的登录流程是怎样的？’或者‘请给我一个修改建议，优化登录相关的用户体验。’"
+          placeholder="请求示例：给这两个文件添加中文注释，并直接返回可应用的完整文件修改建议。"
           value={draftMessage}
           onChange={(event) => onDraftChange(event.target.value)}
         />
         <div className="chat-composer__footer">
-          <p>Streaming from DashScope with selected-file context.</p>
+          <p>{diffPromptExample}</p>
           <button disabled={!canSend} type="submit">
             {isSendingMessage ? '思考中...' : '发送'}
           </button>

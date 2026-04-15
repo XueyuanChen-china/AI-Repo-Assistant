@@ -4,6 +4,7 @@ import { registerCors } from './plugins/cors'
 import { registerChatRoutes } from './routes/chat'
 import { registerHealthRoutes } from './routes/health'
 import { registerRepoRoutes } from './routes/repo'
+import { registerSuggestionRoutes } from './routes/suggestion'
 
 // server/src/index.ts 是后端入口文件。
 // 现在它做的事情很简单：创建 Fastify 实例，然后把各类路由注册进去。
@@ -15,6 +16,7 @@ await registerCors(app)
 await registerHealthRoutes(app)
 await registerRepoRoutes(app)
 await registerChatRoutes(app)
+await registerSuggestionRoutes(app)
 
 try {
   await app.listen({

@@ -265,7 +265,16 @@ export function buildMockChatResponse(input: ChatRequest): ChatResponse {
       content: responseText,
       createdAt: now,
     },
-    diffPreview: shouldSuggestDiff ? buildMockDiffPreview() : null,
+    diffPreviews: shouldSuggestDiff ? [buildMockDiffPreview()] : [],
+    pendingSuggestions: shouldSuggestDiff
+      ? [
+          {
+            targetPath: 'src/pages/LoginPage.tsx',
+            updatedContent: loginAfter,
+            summary: 'Introduce an error state so failed login requests surface a message in the form.',
+          },
+        ]
+      : [],
     contextMeta: {
       usedContextPaths: input.selectedPaths,
       truncatedPaths: [],

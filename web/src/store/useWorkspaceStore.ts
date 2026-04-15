@@ -2,6 +2,7 @@ import type {
   ChatContextMeta,
   DiffPreview,
   InspectorMode,
+  PendingSuggestion,
   RepoFile,
   RepoNode,
   WorkspaceMessage,
@@ -25,7 +26,9 @@ type WorkspaceStore = {
   messages: WorkspaceMessage[]
   draftMessage: string
   inspectorMode: InspectorMode
-  diffPreview: DiffPreview | null
+  diffPreviews: DiffPreview[]
+  pendingSuggestions: PendingSuggestion[]
+  activeSuggestionIndex: number
   lastContextMeta: ChatContextMeta | null
   isBootstrapping: boolean
   isSendingMessage: boolean
@@ -38,15 +41,24 @@ type WorkspaceStore = {
   setRepoRootInput: (value: string) => void
   bootstrapWorkspace: (payload: BootstrapPayload) => void
   openFilePreview: (file: RepoFile) => void
+  replaceOpenFileContent: (file: RepoFile) => void
   toggleContextPath: (path: string) => void
   setDraftMessage: (value: string) => void
   appendUserMessage: (content: string) => void
+  appendAssistantMessage: (content: string) => void
   startSendingMessage: () => void
   beginAssistantStream: (contextMeta: ChatContextMeta) => void
   appendAssistantStreamChunk: (chunk: string) => void
-  finishAssistantMessage: (message: WorkspaceMessage, diffPreview?: DiffPreview | null, contextMeta?: ChatContextMeta | null) => void
+  finishAssistantMessage: (
+    message: WorkspaceMessage,
+    diffPreviews?: DiffPreview[],
+    pendingSuggestions?: PendingSuggestion[],
+    contextMeta?: ChatContextMeta | null,
+  ) => void
   setInspectorMode: (mode: InspectorMode) => void
   clearDiffPreview: () => void
+  setActiveSuggestionIndex: (index: number) => void
+  removeSuggestionAt: (index: number) => void
 }
 
 const starterMessage: WorkspaceMessage = {
@@ -54,6 +66,23 @@ const starterMessage: WorkspaceMessage = {
   role: 'assistant',
   content: 'Day 3 can answer questions using the files you selected as context.',
   createdAt: new Date().toISOString(),
+}
+
+function buildMessage(role: 'user' | 'assistant', content: string): WorkspaceMessage {
+  return {
+    id: `${role}-${Date.now()}`,
+    role,
+    content,
+    createdAt: new Date().toISOString(),
+  }
+}
+
+function clampSuggestionIndex(nextIndex: number, total: number) {
+  if (total <= 0) {
+    return 0
+  }
+
+  return Math.min(Math.max(nextIndex, 0), total - 1)
 }
 
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
@@ -65,8 +94,9 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   messages: [starterMessage],
   draftMessage: '',
   inspectorMode: 'code',
-  diffPreview: null,
-  // 最新一次对话使用的上下文元数据
+  diffPreviews: [],
+  pendingSuggestions: [],
+  activeSuggestionIndex: 0,
   lastContextMeta: null,
   isBootstrapping: false,
   isSendingMessage: false,
@@ -91,15 +121,25 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
       openFile,
       selectedContextPaths: openFile ? [openFile.path] : [],
       inspectorMode: 'code',
-      diffPreview: null,
+      diffPreviews: [],
+      pendingSuggestions: [],
+      activeSuggestionIndex: 0,
       lastContextMeta: null,
       errorMessage: null,
     }),
-  // 打开文件预览
   openFilePreview: (file) =>
     set({
       openFile: file,
       inspectorMode: 'code',
+      diffPreviews: [],
+      pendingSuggestions: [],
+      activeSuggestionIndex: 0,
+      errorMessage: null,
+    }),
+  // 审批应用修改后，如果只是刷新当前打开文件内容，不应该顺带清空其它待审批建议。
+  replaceOpenFileContent: (file) =>
+    set({
+      openFile: file,
       errorMessage: null,
     }),
   // 切换上下文文件路径选中状态
@@ -118,24 +158,23 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   // 添加用户消息
   appendUserMessage: (content) =>
     set((state) => ({
-      messages: [
-        ...state.messages,
-        {
-          id: `user-${Date.now()}`,
-          role: 'user',
-          content,
-          createdAt: new Date().toISOString(),
-        },
-      ],
+      messages: [...state.messages, buildMessage('user', content)],
+    })),
+  appendAssistantMessage: (content) =>
+    set((state) => ({
+      messages: [...state.messages, buildMessage('assistant', content)],
     })),
   // 开始发送消息
   startSendingMessage: () =>
-    set({
+    set((state) => ({
       isSendingMessage: true,
       lastContextMeta: null,
       streamingAssistantId: null,
-    }),
-  // 开始助手流式响应
+      diffPreviews: [],
+      pendingSuggestions: [],
+      activeSuggestionIndex: 0,
+      inspectorMode: state.openFile ? 'code' : state.inspectorMode,
+    })),
   beginAssistantStream: (contextMeta) =>
     set((state) => {
       const assistantId = `assistant-stream-${Date.now()}`
@@ -165,24 +204,28 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         messages: state.messages.map((message) =>
           message.id === state.streamingAssistantId
             ? {
-              ...message,
-              content: `${message.content}${chunk}`,
-            }
+                ...message,
+                content: `${message.content}${chunk}`,
+              }
             : message,
         ),
       }
     }),
-  // 完成助手消息
-  finishAssistantMessage: (message, diffPreview, contextMeta) =>
+  finishAssistantMessage: (message, diffPreviews, pendingSuggestions, contextMeta) =>
     set((state) => {
       const nextMessages = state.streamingAssistantId
         ? state.messages.map((item) => (item.id === state.streamingAssistantId ? message : item))
         : [...state.messages, message]
 
+      const nextDiffPreviews = diffPreviews ?? []
+      const nextPendingSuggestions = pendingSuggestions ?? []
+
       return {
         messages: nextMessages,
-        diffPreview: diffPreview ?? null,
-        inspectorMode: diffPreview ? 'diff' : state.inspectorMode,
+        diffPreviews: nextDiffPreviews,
+        pendingSuggestions: nextPendingSuggestions,
+        activeSuggestionIndex: 0,
+        inspectorMode: nextDiffPreviews.length > 0 ? 'diff' : state.openFile ? 'code' : state.inspectorMode,
         isSendingMessage: false,
         streamingAssistantId: null,
         lastContextMeta: contextMeta ?? state.lastContextMeta,
@@ -193,7 +236,27 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   // 清除差异预览
   clearDiffPreview: () =>
     set((state) => ({
-      diffPreview: null,
+      diffPreviews: [],
+      pendingSuggestions: [],
+      activeSuggestionIndex: 0,
       inspectorMode: state.openFile ? 'code' : state.inspectorMode,
     })),
+    // 设置当前激活的建议索引
+  setActiveSuggestionIndex: (index) =>
+    set((state) => ({
+      activeSuggestionIndex: clampSuggestionIndex(index, state.diffPreviews.length),
+    })),
+    // 移除指定索引的建议
+  removeSuggestionAt: (index) =>
+    set((state) => {
+      const nextDiffPreviews = state.diffPreviews.filter((_, itemIndex) => itemIndex !== index)
+      const nextPendingSuggestions = state.pendingSuggestions.filter((_, itemIndex) => itemIndex !== index)
+
+      return {
+        diffPreviews: nextDiffPreviews,
+        pendingSuggestions: nextPendingSuggestions,
+        activeSuggestionIndex: clampSuggestionIndex(state.activeSuggestionIndex, nextDiffPreviews.length),
+        inspectorMode: nextDiffPreviews.length > 0 ? 'diff' : state.openFile ? 'code' : state.inspectorMode,
+      }
+    }),
 }))
