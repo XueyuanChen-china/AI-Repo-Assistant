@@ -1,4 +1,4 @@
-import type { ChatContextMeta, WorkspaceMessage } from '@ai-repo-assistant/shared'
+import type { WorkspaceMessage } from '@ai-repo-assistant/shared'
 
 import { PanelCard } from './PanelCard'
 
@@ -6,14 +6,11 @@ type ChatPanelProps = {
   messages: WorkspaceMessage[]
   draftMessage: string
   selectedContextPaths: string[]
-  lastContextMeta: ChatContextMeta | null
   isSendingMessage: boolean
   onDraftChange: (value: string) => void
   onSend: () => void
+  onRemoveContext: (path: string) => void
 }
-
-const diffPromptExample =
-  '示例：请直接给出可应用的完整代码修改建议；如果需要改多个文件，请为每个文件分别返回完整文件内容。'
 
 function formatMessageTime(createdAt: string) {
   return new Intl.DateTimeFormat('zh-CN', {
@@ -22,68 +19,44 @@ function formatMessageTime(createdAt: string) {
   }).format(new Date(createdAt))
 }
 
-function buildContextSummary(contextMeta: ChatContextMeta | null) {
-  if (!contextMeta) {
-    return null
-  }
-
-  const usedText = contextMeta.usedContextPaths.length > 0 ? contextMeta.usedContextPaths.join(', ') : 'No file context used'
-  const truncatedText = contextMeta.truncatedPaths.length > 0 ? contextMeta.truncatedPaths.join(', ') : null
-
-  return {
-    usedText,
-    truncatedText,
-  }
+function getMessageAuthorLabel(role: WorkspaceMessage['role']) {
+  return role === 'assistant' ? 'AI 助手' : '我'
 }
 
 export function ChatPanel({
   messages,
   draftMessage,
   selectedContextPaths,
-  lastContextMeta,
   isSendingMessage,
   onDraftChange,
   onSend,
+  onRemoveContext,
 }: ChatPanelProps) {
   const canSend = draftMessage.trim().length > 0 && !isSendingMessage
-  const contextSummary = buildContextSummary(lastContextMeta)
 
   return (
     <PanelCard
-      title="Conversation"
-      subtitle="Ask a repo question or request a code change suggestion backed by selected files."
-      actions={<span className="context-count">{selectedContextPaths.length} file(s) selected</span>}
+      title="对话"
+      actions={<span className="context-count">{selectedContextPaths.length} 个上下文</span>}
     >
       <div className="chat-messages">
         {messages.map((message) => (
           <article key={message.id} className={`message message--${message.role}`}>
             <div className="message__meta">
-              <strong>{message.role === 'assistant' ? 'AI 助手' : '我'}</strong>
+              <strong>{getMessageAuthorLabel(message.role)}</strong>
               <span>{formatMessageTime(message.createdAt)}</span>
             </div>
-            <p>{message.content || (message.role === 'assistant' ? '...' : '')}</p>
+            {message.role === 'assistant' && !message.content.trim() ? (
+              <div className="message__thinking">
+                <span className="chat-spinner" />
+                <span>正在思考</span>
+              </div>
+            ) : (
+              <p>{message.content}</p>
+            )}
           </article>
         ))}
       </div>
-
-      <div className="context-chip-list">
-        {selectedContextPaths.length > 0 ? (
-          selectedContextPaths.map((path) => (
-            <span key={path} className="context-chip">
-              {path}
-            </span>
-          ))
-        ) : (
-          <span className="context-chip context-chip--muted">最多选择 5 个文件</span>
-        )}
-      </div>
-
-      {contextSummary ? (
-        <div className="chat-context-meta">
-          <p>Last answer used: {contextSummary.usedText}</p>
-          {contextSummary.truncatedText ? <p>Trimmed for context budget: {contextSummary.truncatedText}</p> : null}
-        </div>
-      ) : null}
 
       <form
         className="chat-composer"
@@ -94,17 +67,55 @@ export function ChatPanel({
           }
         }}
       >
-        <textarea
-          rows={4}
-          placeholder="请求示例：给这两个文件添加中文注释，并直接返回可应用的完整文件修改建议。"
-          value={draftMessage}
-          onChange={(event) => onDraftChange(event.target.value)}
-        />
-        <div className="chat-composer__footer">
-          <p>{diffPromptExample}</p>
-          <button disabled={!canSend} type="submit">
-            {isSendingMessage ? '思考中...' : '发送'}
-          </button>
+        <div className="chat-composer__shell">
+          {selectedContextPaths.length > 0 ? (
+            <div className="composer-context-list">
+              {selectedContextPaths.map((path) => (
+                <span key={path} className="composer-context-chip">
+                  <span className="composer-context-chip__label">{path}</span>
+                  <button
+                    className="composer-context-chip__close"
+                    type="button"
+                    aria-label={`移除 ${path}`}
+                    onClick={() => onRemoveContext(path)}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          ) : null}
+
+          <textarea
+            rows={3}
+            placeholder="例如：分析这个仓库的登录流程，或者直接给出可应用的完整代码修改建议。"
+            value={draftMessage}
+            onChange={(event) => onDraftChange(event.target.value)}
+          />
+
+          <div className="chat-composer__footer">
+            <span className="chat-composer__status">
+              {isSendingMessage ? (
+                <>
+                  <span className="chat-spinner" />
+                  正在思考
+                </>
+              ) : selectedContextPaths.length > 0 ? (
+                `本轮将参考 ${selectedContextPaths.length} 个上下文文件`
+              ) : (
+                '最多可选择 5 个上下文文件'
+              )}
+            </span>
+
+            <button
+              className="chat-send-button"
+              disabled={!canSend}
+              type="submit"
+              aria-label={isSendingMessage ? '正在发送' : '发送'}
+            >
+              {isSendingMessage ? <span className="chat-send-button__spinner" /> : <span className="chat-send-button__icon">↑</span>}
+            </button>
+          </div>
         </div>
       </form>
     </PanelCard>

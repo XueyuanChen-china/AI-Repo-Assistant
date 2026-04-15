@@ -64,7 +64,7 @@ type WorkspaceStore = {
 const starterMessage: WorkspaceMessage = {
   id: 'assistant-welcome',
   role: 'assistant',
-  content: 'Day 3 can answer questions using the files you selected as context.',
+  content: '先选择本地项目文件夹，再挑选上下文文件和我对话。',
   createdAt: new Date().toISOString(),
 }
 

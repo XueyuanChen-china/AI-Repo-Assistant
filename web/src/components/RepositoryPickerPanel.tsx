@@ -23,6 +23,18 @@ type RepositoryTreeNodeProps = {
   onToggleContext: (path: string) => void
 }
 
+function getServerStatusLabel(serverStatus: string) {
+  if (serverStatus === 'online') {
+    return '在线'
+  }
+
+  if (serverStatus === 'offline') {
+    return '离线'
+  }
+
+  return '检查中'
+}
+
 function RepositoryTreeNode({
   node,
   depth,
@@ -63,7 +75,7 @@ function RepositoryTreeNode({
       </button>
       <label className="tree-file__context">
         <input checked={isSelected} type="checkbox" onChange={() => onToggleContext(node.path)} />
-        <span>Ctx</span>
+        <span>上下文</span>
       </label>
     </div>
   )
@@ -80,27 +92,24 @@ export function RepositoryPickerPanel({
   onOpenFile,
   onToggleContext,
 }: RepositoryPickerPanelProps) {
-  const subtitle = repoRoot
-    ? `${repoRoot} - ${selectedContextPaths.length} context file(s) selected`
-    : 'Pick a local folder to load a repository'
+  const subtitle = repoRoot || '请选择本地文件夹'
 
   return (
     <PanelCard
-      title="Repository"
+      title="仓库"
       subtitle={subtitle}
-      actions={<span className={`status-pill status-pill--${serverStatus}`}>{serverStatus}</span>}
+      actions={<span className={`status-pill status-pill--${serverStatus}`}>{getServerStatusLabel(serverStatus)}</span>}
     >
-      {/* The toolbar stays fixed at the top of the panel. Only the tree below should scroll. */}
       <div className="repo-picker-toolbar">
         <button className="repo-picker-toolbar__button" disabled={isBootstrapping} type="button" onClick={onPickFolder}>
-          {isBootstrapping ? 'Loading...' : 'Open Folder'}
+          {isBootstrapping ? '读取中...' : '打开文件夹'}
         </button>
-        <p className="repo-picker-toolbar__hint">Use the system folder picker so users do not have to paste a local path manually.</p>
+        <span className="repo-picker-toolbar__meta">{selectedContextPaths.length} 个上下文文件</span>
       </div>
 
-      {isBootstrapping ? <p className="panel-empty">Reading files from the selected folder...</p> : null}
+      {isBootstrapping ? <p className="panel-empty">正在读取所选文件夹中的文件...</p> : null}
       {!isBootstrapping && nodes.length === 0 ? (
-        <p className="panel-empty">No previewable source files were found. Try another project folder.</p>
+        <p className="panel-empty">没有找到可预览的源码文件，请重新选择项目文件夹。</p>
       ) : null}
       {!isBootstrapping ? (
         <div className="tree-root">

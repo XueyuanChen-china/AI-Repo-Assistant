@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { type ChatContextMeta, type PendingSuggestion, type WorkspaceMessage } from '@ai-repo-assistant/shared'
+import { type PendingSuggestion, type WorkspaceMessage } from '@ai-repo-assistant/shared'
 
 import { ChatPanel } from '../components/ChatPanel'
 import { InspectorPanel } from '../components/InspectorPanel'
@@ -14,7 +14,7 @@ async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
 
   if (!response.ok) {
     const message = await response.text()
-    throw new Error(message || `Request failed with status ${response.status}`)
+    throw new Error(message || `请求失败，状态码：${response.status}`)
   }
 
   return (await response.json()) as T
@@ -25,9 +25,9 @@ function buildErrorMessage(error: unknown) {
     return error.message
   }
 
-  return 'Unexpected error while talking to the local server.'
+  return '与本地服务通信时发生未知错误。'
 }
-// 兜底处理，确保用户在请求失败时至少能看到一个错误消息，而不是完全没有反馈
+
 function createFallbackAssistantMessage(message: string): WorkspaceMessage {
   return {
     id: `assistant-error-${Date.now()}`,
@@ -35,12 +35,6 @@ function createFallbackAssistantMessage(message: string): WorkspaceMessage {
     content: message,
     createdAt: new Date().toISOString(),
   }
-}
-//空的上下文元数
-const emptyContextMeta: ChatContextMeta = {
-  usedContextPaths: [],
-  truncatedPaths: [],
-  totalCharacters: 0,
 }
 
 function isUsefulHistoryMessage(message: WorkspaceMessage) {
@@ -67,6 +61,18 @@ function buildRecentHistory(messages: WorkspaceMessage[]) {
   return messages.filter(isUsefulHistoryMessage).slice(-6)
 }
 
+function getServerStatusLabel(serverStatus: string) {
+  if (serverStatus === 'online') {
+    return '在线'
+  }
+
+  if (serverStatus === 'offline') {
+    return '离线'
+  }
+
+  return '检查中'
+}
+
 export function FolderPickerWorkspacePage() {
   const repoRoot = useWorkspaceStore((state) => state.repoRoot)
   const repoNodes = useWorkspaceStore((state) => state.repoNodes)
@@ -78,7 +84,6 @@ export function FolderPickerWorkspacePage() {
   const diffPreviews = useWorkspaceStore((state) => state.diffPreviews)
   const pendingSuggestions = useWorkspaceStore((state) => state.pendingSuggestions)
   const activeSuggestionIndex = useWorkspaceStore((state) => state.activeSuggestionIndex)
-  const lastContextMeta = useWorkspaceStore((state) => state.lastContextMeta)
   const isBootstrapping = useWorkspaceStore((state) => state.isBootstrapping)
   const isSendingMessage = useWorkspaceStore((state) => state.isSendingMessage)
   const serverStatus = useWorkspaceStore((state) => state.serverStatus)
@@ -98,34 +103,25 @@ export function FolderPickerWorkspacePage() {
   const appendAssistantStreamChunk = useWorkspaceStore((state) => state.appendAssistantStreamChunk)
   const finishAssistantMessage = useWorkspaceStore((state) => state.finishAssistantMessage)
   const setInspectorMode = useWorkspaceStore((state) => state.setInspectorMode)
-  const clearDiffPreview = useWorkspaceStore((state) => state.clearDiffPreview)
   const removeSuggestionAt = useWorkspaceStore((state) => state.removeSuggestionAt)
   const setActiveSuggestionIndex = useWorkspaceStore((state) => state.setActiveSuggestionIndex)
 
-  // 处理应用建议的函数，接收建议的索引和建议对象
   const handleApplySuggestion = async (index: number, suggestion: PendingSuggestion) => {
     try {
-      // 将建议的更新内容写入目标文件
       const updatedFile = await writeSelectedRepoFile(suggestion.targetPath, suggestion.updatedContent)
 
-      // 如果打开的文件路径与更新的文件路径匹配，则更新编辑器中的文件内容
       if (openFile?.path === updatedFile.path || openFile?.path === suggestion.targetPath) {
         replaceOpenFileContent(updatedFile)
       }
 
-      // 从待处理建议列表中移除该建议
       removeSuggestionAt(index)
-      // 添加系统消息表示修改已应用
       appendAssistantMessage(`[系统] 已应用 ${updatedFile.path} 的修改`)
     } catch (error) {
-      // 捕获错误并设置错误消息
       setErrorMessage(error instanceof Error ? error.message : '应用修改失败')
     }
   }
 
-  // 处理丢弃建议的函数，接收建议的索引
   const handleDiscardSuggestion = (index: number) => {
-    // 从待处理建议列表中移除该建议
     removeSuggestionAt(index)
   }
 
@@ -181,10 +177,8 @@ export function FolderPickerWorkspacePage() {
   }
 
   async function handleSendMessage() {
-    // 获取并修剪用户输入的消息
     const nextMessage = draftMessage.trim()
 
-    // 如果消息为空或正在发送消息，则返回
     if (!nextMessage || isSendingMessage) {
       return
     }
@@ -201,7 +195,6 @@ export function FolderPickerWorkspacePage() {
       let hasCreatedAssistantDraft = false
       let hasCompleted = false
 
-      // 流式处理聊天响应
       await streamChatRequest(payload, {
         onEvent: (event) => {
           if (event.type === 'context') {
@@ -214,7 +207,11 @@ export function FolderPickerWorkspacePage() {
 
           if (event.type === 'chunk') {
             if (!hasCreatedAssistantDraft) {
-              beginAssistantStream(emptyContextMeta)
+              beginAssistantStream({
+                usedContextPaths: [],
+                truncatedPaths: [],
+                totalCharacters: 0,
+              })
               hasCreatedAssistantDraft = true
             }
 
@@ -237,12 +234,10 @@ export function FolderPickerWorkspacePage() {
         },
       })
 
-      // 验证流是否正确完成
       if (!hasCompleted) {
-        throw new Error('The stream ended before a final assistant message was received.')
+        throw new Error('流式响应在收到最终结果前就结束了。')
       }
     } catch (error) {
-      // 主请求失败，尝试备用请求
       const primaryError = buildErrorMessage(error)
 
       try {
@@ -257,10 +252,10 @@ export function FolderPickerWorkspacePage() {
       } catch (fallbackError) {
         const finalError = buildErrorMessage(fallbackError)
         finishAssistantMessage(
-          createFallbackAssistantMessage(`The assistant request failed. ${primaryError}. Fallback also failed: ${finalError}`),
+          createFallbackAssistantMessage(`助手请求失败：${primaryError}。备用请求也失败了：${finalError}`),
           [],
           [],
-          emptyContextMeta,
+          null,
         )
         setErrorMessage(finalError)
       }
@@ -270,18 +265,14 @@ export function FolderPickerWorkspacePage() {
   return (
     <div className="workspace-shell">
       <header className="workspace-topbar">
-        <div>
-          <p className="workspace-topbar__eyebrow">AI REPO ASSISTANT</p>
-          <h1>Web MVP for a repo-level coding assistant</h1>
-          <p className="workspace-topbar__summary">
-            This version uses a local folder picker instead of manual path input. The left column shows the repository tree,
-            the center column handles chat, and the right column previews source code or diff output.
-          </p>
+        <div className="workspace-topbar__title">
+          <p className="workspace-topbar__eyebrow">AI 仓库助手</p>
+          <h1>仓库级代码工作台</h1>
         </div>
         <div className="workspace-topbar__meta">
-          <span className={`status-pill status-pill--${serverStatus}`}>{serverStatus}</span>
-          <span className="meta-card">{selectedContextPaths.length} context file(s)</span>
-          <span className="meta-card">{repoRoot || 'No repository loaded'}</span>
+          <span className={`status-pill status-pill--${serverStatus}`}>{getServerStatusLabel(serverStatus)}</span>
+          <span className="meta-card">{selectedContextPaths.length} 个上下文文件</span>
+          <span className="meta-card meta-card--path">{repoRoot || '未打开仓库'}</span>
         </div>
       </header>
 
@@ -307,10 +298,10 @@ export function FolderPickerWorkspacePage() {
               messages={messages}
               draftMessage={draftMessage}
               selectedContextPaths={selectedContextPaths}
-              lastContextMeta={lastContextMeta}
               isSendingMessage={isSendingMessage}
               onDraftChange={setDraftMessage}
               onSend={handleSendMessage}
+              onRemoveContext={toggleContextPath}
             />
           }
           right={

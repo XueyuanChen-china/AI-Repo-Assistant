@@ -1,7 +1,36 @@
-import { FolderPickerWorkspacePage } from './pages/FolderPickerWorkspacePage'
+import { useEffect, useState } from 'react'
 
-// App 目前很薄，只负责把真正的工作区页面挂进来。
-// 后面如果要加路由、登录页、设置页，通常会从这里开始扩展。
+import { FolderPickerWorkspacePage } from './pages/FolderPickerWorkspacePage'
+import { IntroPage } from './pages/IntroPage'
+
+const INTRO_STORAGE_KEY = 'ai-repo-assistant.intro-seen'
+
+function readIntroSeen() {
+  if (typeof window === 'undefined') {
+    return true
+  }
+
+  try {
+    return window.localStorage.getItem(INTRO_STORAGE_KEY) === 'true'
+  } catch {
+    return false
+  }
+}
+
 export default function App() {
+  const [hasSeenIntro, setHasSeenIntro] = useState(() => readIntroSeen())
+
+  useEffect(() => {
+    if (!hasSeenIntro || typeof window === 'undefined') {
+      return
+    }
+
+    window.localStorage.setItem(INTRO_STORAGE_KEY, 'true')
+  }, [hasSeenIntro])
+
+  if (!hasSeenIntro) {
+    return <IntroPage onEnterWorkspace={() => setHasSeenIntro(true)} />
+  }
+
   return <FolderPickerWorkspacePage />
 }

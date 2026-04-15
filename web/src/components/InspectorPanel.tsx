@@ -353,11 +353,11 @@ function DiffPreviewArea({
 
       <div className="diff-grid">
         <section>
-          <h4>Before</h4>
+          <h4>修改前</h4>
           <DiffCodeBlock rows={rows} side="before" />
         </section>
         <section>
-          <h4>After</h4>
+          <h4>修改后</h4>
           <DiffCodeBlock rows={rows} side="after" />
         </section>
       </div>
