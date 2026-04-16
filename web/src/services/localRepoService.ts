@@ -20,6 +20,24 @@ type PickerWindow = Window & {
   showDirectoryPicker?: () => Promise<FileSystemDirectoryHandle>
 }
 
+function createPickerAbortError() {
+  const error = new Error('FOLDER_PICKER_ABORTED')
+  error.name = 'AbortError'
+  return error
+}
+
+export function isFolderPickerAbortError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false
+  }
+
+  if (error.name === 'AbortError') {
+    return true
+  }
+
+  return /aborted a request|no folder was selected/i.test(error.message)
+}
+
 const ignoredDirectoryNames = new Set([
   '.git',
   'node_modules',
@@ -324,7 +342,7 @@ async function pickWithInputElement() {
   })
 
   if (!fileList || fileList.length === 0) {
-    throw new Error('No folder was selected.')
+    throw createPickerAbortError()
   }
 
   selectedFiles.clear()
@@ -365,8 +383,16 @@ export async function pickLocalRepository() {
   const pickerWindow = window as PickerWindow
 
   if (typeof pickerWindow.showDirectoryPicker === 'function') {
-    const directoryHandle = await pickerWindow.showDirectoryPicker()
-    return buildSnapshotFromDirectoryHandle(directoryHandle)
+    try {
+      const directoryHandle = await pickerWindow.showDirectoryPicker()
+      return buildSnapshotFromDirectoryHandle(directoryHandle)
+    } catch (error) {
+      if (isFolderPickerAbortError(error)) {
+        throw createPickerAbortError()
+      }
+
+      throw error
+    }
   }
 
   return pickWithInputElement()

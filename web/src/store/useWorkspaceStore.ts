@@ -17,6 +17,11 @@ type BootstrapPayload = {
   openFile: RepoFile | null
 }
 
+type PersistedWorkspaceSession = {
+  draftMessage: string
+  messages: WorkspaceMessage[]
+}
+
 type WorkspaceStore = {
   repoRoot: string
   repoRootInput: string
@@ -61,6 +66,8 @@ type WorkspaceStore = {
   removeSuggestionAt: (index: number) => void
 }
 
+const SESSION_STORAGE_KEY = 'ai-repo-assistant.workspace-session'
+
 const starterMessage: WorkspaceMessage = {
   id: 'assistant-welcome',
   role: 'assistant',
@@ -85,14 +92,82 @@ function clampSuggestionIndex(nextIndex: number, total: number) {
   return Math.min(Math.max(nextIndex, 0), total - 1)
 }
 
+function isWorkspaceMessage(value: unknown): value is WorkspaceMessage {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const message = value as Record<string, unknown>
+  return (
+    typeof message.id === 'string' &&
+    (message.role === 'user' || message.role === 'assistant') &&
+    typeof message.content === 'string' &&
+    typeof message.createdAt === 'string'
+  )
+}
+
+function readPersistedSession(): PersistedWorkspaceSession {
+  if (typeof window === 'undefined') {
+    return {
+      draftMessage: '',
+      messages: [starterMessage],
+    }
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(SESSION_STORAGE_KEY)
+
+    if (!rawValue) {
+      return {
+        draftMessage: '',
+        messages: [starterMessage],
+      }
+    }
+
+    const parsed = JSON.parse(rawValue) as Partial<PersistedWorkspaceSession>
+    const messages = Array.isArray(parsed.messages) ? parsed.messages.filter(isWorkspaceMessage) : []
+    const draftMessage = typeof parsed.draftMessage === 'string' ? parsed.draftMessage : ''
+
+    return {
+      draftMessage,
+      messages: messages.length > 0 ? messages : [starterMessage],
+    }
+  } catch {
+    return {
+      draftMessage: '',
+      messages: [starterMessage],
+    }
+  }
+}
+
+function persistSession(messages: WorkspaceMessage[], draftMessage: string) {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(
+      SESSION_STORAGE_KEY,
+      JSON.stringify({
+        draftMessage,
+        messages,
+      } satisfies PersistedWorkspaceSession),
+    )
+  } catch {
+    // 会话持久化只是附加体验，失败时不应该影响主流程。
+  }
+}
+
+const initialSession = readPersistedSession()
+
 export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   repoRoot: '',
   repoRootInput: '',
   repoNodes: [],
   openFile: null,
   selectedContextPaths: [],
-  messages: [starterMessage],
-  draftMessage: '',
+  messages: initialSession.messages,
+  draftMessage: initialSession.draftMessage,
   inspectorMode: 'code',
   diffPreviews: [],
   pendingSuggestions: [],
@@ -100,19 +175,13 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
   lastContextMeta: null,
   isBootstrapping: false,
   isSendingMessage: false,
-  // 正在流式传输的助手消息ID，用于在消息列表中找到对应消息并追加内容
   streamingAssistantId: null,
   serverStatus: 'checking',
   errorMessage: null,
-  // 设置正在启动状态
   setBootstrapping: (value) => set({ isBootstrapping: value }),
-  // 设置服务器状态
   setServerStatus: (status) => set({ serverStatus: status }),
-  // 设置错误信息
   setErrorMessage: (message) => set({ errorMessage: message }),
-  // 设置仓库根目录输入值
   setRepoRootInput: (value) => set({ repoRootInput: value }),
-  // 初始化工作区
   bootstrapWorkspace: ({ root, nodes, openFile }) =>
     set({
       repoRoot: root,
@@ -136,13 +205,11 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
       activeSuggestionIndex: 0,
       errorMessage: null,
     }),
-  // 审批应用修改后，如果只是刷新当前打开文件内容，不应该顺带清空其它待审批建议。
   replaceOpenFileContent: (file) =>
     set({
       openFile: file,
       errorMessage: null,
     }),
-  // 切换上下文文件路径选中状态
   toggleContextPath: (path) =>
     set((state) => {
       const isSelected = state.selectedContextPaths.includes(path)
@@ -153,62 +220,101 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
           : [...state.selectedContextPaths.slice(-4), path],
       }
     }),
-  // 设置草稿消息
-  setDraftMessage: (value) => set({ draftMessage: value }),
-  // 添加用户消息
+  setDraftMessage: (value) =>
+    set((state) => {
+      persistSession(state.messages, value)
+      return { draftMessage: value }
+    }),
   appendUserMessage: (content) =>
-    set((state) => ({
-      messages: [...state.messages, buildMessage('user', content)],
-    })),
+    set((state) => {
+      const nextMessages = [...state.messages, buildMessage('user', content)]
+      persistSession(nextMessages, state.draftMessage)
+
+      return {
+        messages: nextMessages,
+      }
+    }),
   appendAssistantMessage: (content) =>
-    set((state) => ({
-      messages: [...state.messages, buildMessage('assistant', content)],
-    })),
-  // 开始发送消息
+    set((state) => {
+      const nextMessages = [...state.messages, buildMessage('assistant', content)]
+      persistSession(nextMessages, state.draftMessage)
+
+      return {
+        messages: nextMessages,
+      }
+    }),
   startSendingMessage: () =>
-    set((state) => ({
-      isSendingMessage: true,
-      lastContextMeta: null,
-      streamingAssistantId: null,
-      diffPreviews: [],
-      pendingSuggestions: [],
-      activeSuggestionIndex: 0,
-      inspectorMode: state.openFile ? 'code' : state.inspectorMode,
-    })),
-  beginAssistantStream: (contextMeta) =>
     set((state) => {
       const assistantId = `assistant-stream-${Date.now()}`
+      const nextMessages = [
+        ...state.messages,
+        {
+          id: assistantId,
+          role: 'assistant' as const,
+          content: '',
+          createdAt: new Date().toISOString(),
+        },
+      ]
+
+      persistSession(nextMessages, state.draftMessage)
+
+      return {
+        isSendingMessage: true,
+        lastContextMeta: null,
+        streamingAssistantId: assistantId,
+        diffPreviews: [],
+        pendingSuggestions: [],
+        activeSuggestionIndex: 0,
+        inspectorMode: state.openFile ? 'code' : state.inspectorMode,
+        messages: nextMessages,
+      }
+    }),
+  beginAssistantStream: (contextMeta) =>
+    set((state) => {
+      if (state.streamingAssistantId) {
+        return {
+          lastContextMeta: contextMeta,
+        }
+      }
+
+      const assistantId = `assistant-stream-${Date.now()}`
+      const nextMessages = [
+        ...state.messages,
+        {
+          id: assistantId,
+          role: 'assistant' as const,
+          content: '',
+          createdAt: new Date().toISOString(),
+        },
+      ]
+
+      persistSession(nextMessages, state.draftMessage)
 
       return {
         lastContextMeta: contextMeta,
         streamingAssistantId: assistantId,
-        messages: [
-          ...state.messages,
-          {
-            id: assistantId,
-            role: 'assistant',
-            content: '',
-            createdAt: new Date().toISOString(),
-          },
-        ],
+        messages: nextMessages,
       }
     }),
-  // 追加助手流式响应内容
   appendAssistantStreamChunk: (chunk) =>
     set((state) => {
       if (!state.streamingAssistantId) {
         return state
       }
 
+      const nextMessages = state.messages.map((message) =>
+        message.id === state.streamingAssistantId
+          ? {
+              ...message,
+              content: `${message.content}${chunk}`,
+            }
+          : message,
+      )
+
+      persistSession(nextMessages, state.draftMessage)
+
       return {
-        messages: state.messages.map((message) =>
-          message.id === state.streamingAssistantId
-            ? {
-                ...message,
-                content: `${message.content}${chunk}`,
-              }
-            : message,
-        ),
+        messages: nextMessages,
       }
     }),
   finishAssistantMessage: (message, diffPreviews, pendingSuggestions, contextMeta) =>
@@ -219,6 +325,8 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
 
       const nextDiffPreviews = diffPreviews ?? []
       const nextPendingSuggestions = pendingSuggestions ?? []
+
+      persistSession(nextMessages, state.draftMessage)
 
       return {
         messages: nextMessages,
@@ -231,9 +339,7 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
         lastContextMeta: contextMeta ?? state.lastContextMeta,
       }
     }),
-  // 设置检查器模式
   setInspectorMode: (mode) => set({ inspectorMode: mode }),
-  // 清除差异预览
   clearDiffPreview: () =>
     set((state) => ({
       diffPreviews: [],
@@ -241,12 +347,10 @@ export const useWorkspaceStore = create<WorkspaceStore>((set) => ({
       activeSuggestionIndex: 0,
       inspectorMode: state.openFile ? 'code' : state.inspectorMode,
     })),
-    // 设置当前激活的建议索引
   setActiveSuggestionIndex: (index) =>
     set((state) => ({
       activeSuggestionIndex: clampSuggestionIndex(index, state.diffPreviews.length),
     })),
-    // 移除指定索引的建议
   removeSuggestionAt: (index) =>
     set((state) => {
       const nextDiffPreviews = state.diffPreviews.filter((_, itemIndex) => itemIndex !== index)

@@ -18,6 +18,7 @@ type InspectorPanelProps = {
   diffPreviews: DiffPreview[]
   pendingSuggestions: PendingSuggestion[]
   activeSuggestionIndex: number
+  applyingSuggestionIndex: number | null
   onModeChange: (mode: InspectorMode) => void
   onActiveSuggestionChange: (index: number) => void
   onApplySuggestion: (index: number, suggestion: PendingSuggestion) => Promise<void>
@@ -84,10 +85,12 @@ function getFileDisplayName(filePath: string) {
 function SuggestionSwitcher({
   diffPreviews,
   activeSuggestionIndex,
+  disabled,
   onChange,
 }: {
   diffPreviews: DiffPreview[]
   activeSuggestionIndex: number
+  disabled: boolean
   onChange: (index: number) => void
 }) {
   if (diffPreviews.length <= 1) {
@@ -100,6 +103,7 @@ function SuggestionSwitcher({
         <button
           key={`${diffPreview.path}-${index}`}
           className={index === activeSuggestionIndex ? 'is-active' : ''}
+          disabled={disabled}
           type="button"
           onClick={() => onChange(index)}
         >
@@ -334,11 +338,13 @@ function DiffCodeBlock({
 function DiffPreviewArea({
   diffPreview,
   pendingSuggestion,
+  isApplying,
   onApply,
   onDiscard,
 }: {
   diffPreview: DiffPreview
   pendingSuggestion: PendingSuggestion | null
+  isApplying: boolean
   onApply: () => void
   onDiscard: () => void
 }) {
@@ -366,11 +372,18 @@ function DiffPreviewArea({
       {pendingSuggestion ? (
         <div className="diff-actions">
           {/* 应用修改：真正写回文件的动作发生在页面层和 localRepoService 中。 */}
-          <button className="btn-apply" onClick={onApply}>
-            应用修改
+          <button className="btn-apply" disabled={isApplying} type="button" onClick={onApply}>
+            {isApplying ? (
+              <>
+                <span className="chat-send-button__spinner" />
+                应用中...
+              </>
+            ) : (
+              '应用修改'
+            )}
           </button>
           {/* 放弃建议：只移除当前 suggestion，不写文件。 */}
-          <button className="btn-discard" onClick={onDiscard}>
+          <button className="btn-discard" disabled={isApplying} type="button" onClick={onDiscard}>
             放弃建议
           </button>
         </div>
@@ -385,6 +398,7 @@ export function InspectorPanel({
   diffPreviews,
   pendingSuggestions,
   activeSuggestionIndex,
+  applyingSuggestionIndex,
   onModeChange,
   onActiveSuggestionChange,
   onApplySuggestion,
@@ -394,6 +408,7 @@ export function InspectorPanel({
   // 右侧面板自己不维护复杂状态，只负责“按当前索引把内容显示出来”。
   const activeDiffPreview = diffPreviews[activeSuggestionIndex] ?? null
   const activeSuggestion = pendingSuggestions[activeSuggestionIndex] ?? null
+  const isApplyingCurrentSuggestion = applyingSuggestionIndex === activeSuggestionIndex
 
   // 顶部副标题会根据当前模式变化：
   // - diff 模式：展示当前建议对应的文件路径
@@ -417,11 +432,13 @@ export function InspectorPanel({
           <SuggestionSwitcher
             diffPreviews={diffPreviews}
             activeSuggestionIndex={activeSuggestionIndex}
+            disabled={applyingSuggestionIndex !== null}
             onChange={onActiveSuggestionChange}
           />
           <DiffPreviewArea
             diffPreview={activeDiffPreview}
             pendingSuggestion={activeSuggestion}
+            isApplying={isApplyingCurrentSuggestion}
             onApply={() => {
               if (activeSuggestion) {
                 void onApplySuggestion(activeSuggestionIndex, activeSuggestion)

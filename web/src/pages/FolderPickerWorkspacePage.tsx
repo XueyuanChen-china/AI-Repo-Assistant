@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { type PendingSuggestion, type WorkspaceMessage } from '@ai-repo-assistant/shared'
 
 import { ChatPanel } from '../components/ChatPanel'
@@ -6,7 +6,12 @@ import { InspectorPanel } from '../components/InspectorPanel'
 import { RepositoryPickerPanel } from '../components/RepositoryPickerPanel'
 import { WorkspaceSplitLayout } from '../components/WorkspaceSplitLayout'
 import { buildChatRequestPayload, sendChatRequest, streamChatRequest } from '../services/chatApi'
-import { pickLocalRepository, readSelectedRepoFile, writeSelectedRepoFile } from '../services/localRepoService'
+import {
+  isFolderPickerAbortError,
+  pickLocalRepository,
+  readSelectedRepoFile,
+  writeSelectedRepoFile,
+} from '../services/localRepoService'
 import { useWorkspaceStore } from '../store/useWorkspaceStore'
 
 async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
@@ -21,11 +26,33 @@ async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 function buildErrorMessage(error: unknown) {
-  if (error instanceof Error) {
-    return error.message
+  if (!(error instanceof Error)) {
+    return '与本地服务通信时发生未知错误。'
   }
 
-  return '与本地服务通信时发生未知错误。'
+  const message = error.message
+
+  if (message === 'FOLDER_PICKER_ABORTED') {
+    return ''
+  }
+
+  if (message.includes('The current folder selection mode is read-only')) {
+    return '当前文件夹处于只读模式。请使用浏览器原生文件夹选择器重新打开，以允许写入文件。'
+  }
+
+  if (message.includes('The selected file could not be found in memory')) {
+    return '当前文件句柄已失效，请重新打开项目文件夹。'
+  }
+
+  if (message.includes('File is too large')) {
+    return '文件过大，当前版本仅支持预览 256KB 以内的文件。'
+  }
+
+  if (message.includes('The stream ended before a final assistant message was received.')) {
+    return '流式响应在收到最终结果前就结束了。'
+  }
+
+  return message
 }
 
 function createFallbackAssistantMessage(message: string): WorkspaceMessage {
@@ -74,6 +101,8 @@ function getServerStatusLabel(serverStatus: string) {
 }
 
 export function FolderPickerWorkspacePage() {
+  const [applyingSuggestionIndex, setApplyingSuggestionIndex] = useState<number | null>(null)
+
   const repoRoot = useWorkspaceStore((state) => state.repoRoot)
   const repoNodes = useWorkspaceStore((state) => state.repoNodes)
   const openFile = useWorkspaceStore((state) => state.openFile)
@@ -103,27 +132,8 @@ export function FolderPickerWorkspacePage() {
   const appendAssistantStreamChunk = useWorkspaceStore((state) => state.appendAssistantStreamChunk)
   const finishAssistantMessage = useWorkspaceStore((state) => state.finishAssistantMessage)
   const setInspectorMode = useWorkspaceStore((state) => state.setInspectorMode)
-  const removeSuggestionAt = useWorkspaceStore((state) => state.removeSuggestionAt)
   const setActiveSuggestionIndex = useWorkspaceStore((state) => state.setActiveSuggestionIndex)
-
-  const handleApplySuggestion = async (index: number, suggestion: PendingSuggestion) => {
-    try {
-      const updatedFile = await writeSelectedRepoFile(suggestion.targetPath, suggestion.updatedContent)
-
-      if (openFile?.path === updatedFile.path || openFile?.path === suggestion.targetPath) {
-        replaceOpenFileContent(updatedFile)
-      }
-
-      removeSuggestionAt(index)
-      appendAssistantMessage(`[系统] 已应用 ${updatedFile.path} 的修改`)
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : '应用修改失败')
-    }
-  }
-
-  const handleDiscardSuggestion = (index: number) => {
-    removeSuggestionAt(index)
-  }
+  const removeSuggestionAt = useWorkspaceStore((state) => state.removeSuggestionAt)
 
   useEffect(() => {
     let cancelled = false
@@ -160,6 +170,10 @@ export function FolderPickerWorkspacePage() {
       const snapshot = await pickLocalRepository()
       bootstrapWorkspace(snapshot)
     } catch (error) {
+      if (isFolderPickerAbortError(error)) {
+        return
+      }
+
       setErrorMessage(buildErrorMessage(error))
     } finally {
       setBootstrapping(false)
@@ -176,10 +190,43 @@ export function FolderPickerWorkspacePage() {
     }
   }
 
+  async function handleApplySuggestion(index: number, suggestion: PendingSuggestion) {
+    setApplyingSuggestionIndex(index)
+    setErrorMessage(null)
+
+    try {
+      const updatedFile = await writeSelectedRepoFile(suggestion.targetPath, suggestion.updatedContent)
+
+      if (openFile?.path === updatedFile.path || openFile?.path === suggestion.targetPath) {
+        replaceOpenFileContent(updatedFile)
+      }
+
+      removeSuggestionAt(index)
+      appendAssistantMessage(`[系统] 已应用 ${updatedFile.path} 的修改`)
+    } catch (error) {
+      setErrorMessage(buildErrorMessage(error))
+    } finally {
+      setApplyingSuggestionIndex(null)
+    }
+  }
+
+  function handleDiscardSuggestion(index: number) {
+    if (applyingSuggestionIndex !== null) {
+      return
+    }
+
+    removeSuggestionAt(index)
+  }
+
   async function handleSendMessage() {
     const nextMessage = draftMessage.trim()
 
     if (!nextMessage || isSendingMessage) {
+      return
+    }
+
+    if (!repoRoot || repoNodes.length === 0) {
+      setErrorMessage('请先打开本地项目文件夹，再开始提问或请求代码修改建议。')
       return
     }
 
@@ -192,29 +239,16 @@ export function FolderPickerWorkspacePage() {
 
     try {
       const payload = await buildChatRequestPayload(nextMessage, selectedContextPaths, recentHistory)
-      let hasCreatedAssistantDraft = false
       let hasCompleted = false
 
       await streamChatRequest(payload, {
         onEvent: (event) => {
           if (event.type === 'context') {
-            if (!hasCreatedAssistantDraft) {
-              beginAssistantStream(event.contextMeta)
-              hasCreatedAssistantDraft = true
-            }
+            beginAssistantStream(event.contextMeta)
             return
           }
 
           if (event.type === 'chunk') {
-            if (!hasCreatedAssistantDraft) {
-              beginAssistantStream({
-                usedContextPaths: [],
-                truncatedPaths: [],
-                totalCharacters: 0,
-              })
-              hasCreatedAssistantDraft = true
-            }
-
             appendAssistantStreamChunk(event.content)
             return
           }
@@ -235,7 +269,7 @@ export function FolderPickerWorkspacePage() {
       })
 
       if (!hasCompleted) {
-        throw new Error('流式响应在收到最终结果前就结束了。')
+        throw new Error('The stream ended before a final assistant message was received.')
       }
     } catch (error) {
       const primaryError = buildErrorMessage(error)
@@ -311,6 +345,7 @@ export function FolderPickerWorkspacePage() {
               diffPreviews={diffPreviews}
               pendingSuggestions={pendingSuggestions}
               activeSuggestionIndex={activeSuggestionIndex}
+              applyingSuggestionIndex={applyingSuggestionIndex}
               onModeChange={setInspectorMode}
               onActiveSuggestionChange={setActiveSuggestionIndex}
               onApplySuggestion={handleApplySuggestion}
