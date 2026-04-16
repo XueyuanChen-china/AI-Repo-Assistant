@@ -17,14 +17,14 @@ await registerHealthRoutes(app)
 await registerRepoRoutes(app)
 await registerChatRoutes(app)
 await registerSuggestionRoutes(app)
-
+const port = Number(process.env.PORT || 8787)
 try {
   await app.listen({
     host: '0.0.0.0',
-    port: 8787,
+    port: port,
   })
 
-  app.log.info('AI Repo Assistant server is running at http://localhost:8787')
+  app.log.info(`AI Repo Assistant server is running at http://localhost:${port}`)
 } catch (error) {
   app.log.error(error)
   throw error
