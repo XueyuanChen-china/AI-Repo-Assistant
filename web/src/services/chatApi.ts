@@ -8,6 +8,7 @@ import {
   type WorkspaceMessage,
 } from '@ai-repo-assistant/shared'
 
+import { withApiBase } from './apiBase'
 import { readSelectedRepoFile } from './localRepoService'
 
 type StreamHandlers = {
@@ -50,7 +51,7 @@ async function readJson<T>(input: RequestInfo | URL, init?: RequestInit) {
 }
 
 export async function sendChatRequest(payload: ChatRequest): Promise<ChatResponse> {
-  const response = await readJson('/api/chat', {
+  const response = await readJson(withApiBase('/api/chat'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -62,7 +63,7 @@ export async function sendChatRequest(payload: ChatRequest): Promise<ChatRespons
 }
 
 export async function streamChatRequest(payload: ChatRequest, handlers: StreamHandlers) {
-  const response = await fetch('/api/chat/stream', {
+  const response = await fetch(withApiBase('/api/chat/stream'), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

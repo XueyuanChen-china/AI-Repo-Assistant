@@ -5,6 +5,7 @@ import { ChatPanel } from '../components/ChatPanel'
 import { InspectorPanel } from '../components/InspectorPanel'
 import { RepositoryPickerPanel } from '../components/RepositoryPickerPanel'
 import { WorkspaceSplitLayout } from '../components/WorkspaceSplitLayout'
+import { withApiBase } from '../services/apiBase'
 import { buildChatRequestPayload, sendChatRequest, streamChatRequest } from '../services/chatApi'
 import {
   isFolderPickerAbortError,
@@ -142,7 +143,7 @@ export function FolderPickerWorkspacePage() {
       setServerStatus('checking')
 
       try {
-        await readJson('/api/health')
+        await readJson(withApiBase('/api/health'))
 
         if (!cancelled) {
           setServerStatus('online')
