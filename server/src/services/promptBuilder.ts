@@ -26,7 +26,7 @@ const systemPrompt = [
   'CODE_SUGGESTION_END',
   '',
   'Rules for suggestions:',
-  '1. Prefer 1 suggestion, but you may return up to 3 files when the request clearly requires multiple files.',
+  '1. Prefer 1 suggestion, but you may return up to 5 files when the request clearly requires multiple files.',
   '2. The Target Path MUST match one of the provided file paths.',
   '3. The content inside the code block MUST be the FULL updated file content, not a partial diff.',
   '4. Do not invent a new file name when the user is asking to modify an existing file.',

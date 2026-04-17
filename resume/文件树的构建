@@ -1,0 +1,163 @@
+右侧文件树构建的流程怎么走？
+回答：
+
+这个项目里的文件树不是后端提前生成好再返回给前端的，而是用户在浏览器里选择本地文件夹后，由前端基于 File System Access API 递归构建出来的。
+
+整体流程是：
+
+用户点击左侧“打开文件夹”按钮。
+前端调用浏览器原生文件夹选择能力，让用户主动授权访问一个本地目录。
+选中文件夹后，前端递归遍历目录结构，把目录和文件统一转换成 RepoNode 树形数据。
+同时前端会过滤掉不适合展示的目录和文件，比如 .git、node_modules、dist 等。
+文件树数据进入 Zustand store 后，左侧面板会递归渲染整棵树。
+用户点击某个文件节点时，再按路径去读取该文件内容，并显示到右侧查看器。
+所以它的核心特点是：
+
+不是服务端扫描仓库后返回树
+而是前端基于用户授权后的本地文件句柄，自己构建文件树和文件读取链路
+这也是为什么后面审批写回能直接落在本地文件上，因为前端从一开始就拿到了文件系统上下文。
+
+对应代码链路
+1. 用户点击“打开文件夹”
+入口在：
+
+RepositoryPickerPanel.tsx
+点击按钮后会调用：
+
+onPickFolder
+这个函数实际由页面层传入。
+
+2. 页面层处理文件夹选择
+在：
+
+FolderPickerWorkspacePage.tsx
+核心函数：
+
+handlePickFolder()
+它负责：
+
+设置 loading 状态
+调用 pickLocalRepository()
+成功后把结果交给 bootstrapWorkspace(...)
+如果用户取消选择，则静默结束，不报错
+你可以把它理解成：
+
+“文件夹选择流程的页面总入口”
+
+3. 真正构建文件树的地方
+在：
+
+localRepoService.ts
+核心函数是：
+
+pickLocalRepository()
+它会做几件关键事情：
+
+第一步：拿到目录句柄
+优先尝试：
+
+window.showDirectoryPicker()
+如果浏览器不支持，再走降级方案。
+
+第二步：递归遍历目录
+它会递归扫描目录下的子目录和文件，把它们统一转换成前端能用的树节点结构。
+
+这里构建出来的核心数据类型就是：
+
+RepoNode
+通常一个节点至少会包含：
+
+id
+name
+path
+type
+children
+第三步：过滤无关目录和文件
+这一步是为了避免文件树太脏、太重。
+
+比如会过滤掉这类目录：
+
+.git
+node_modules
+dist
+build
+.next
+coverage
+也会跳过一些不适合直接预览的文件。
+
+第四步：记录文件句柄映射
+除了生成树，还会把文件路径和真实文件句柄缓存起来。
+
+这一步很关键，因为后面你要：
+
+点击文件时按路径读取内容
+审批后按路径写回文件
+所以它不只是“生成树”，还顺手建立了：
+
+路径 -> 文件句柄
+
+这条映射关系。
+
+4. 文件树进入全局状态
+回到：
+
+FolderPickerWorkspacePage.tsx
+pickLocalRepository() 返回后，会调用：
+
+bootstrapWorkspace(snapshot)
+这个函数在：
+
+useWorkspaceStore.ts
+它会把这些数据存进 store：
+
+repoRoot
+repoNodes
+openFile
+selectedContextPaths
+也就是说，文件树真正进入页面可用状态，是在这里完成的。
+
+5. 左侧递归渲染文件树
+还是在：
+
+RepositoryPickerPanel.tsx
+这里的递归组件是：
+
+RepositoryTreeNode
+它的思路很简单：
+
+如果当前节点是目录，就递归渲染子节点
+如果当前节点是文件，就渲染文件按钮和上下文勾选框
+你可以把它理解成：
+
+“数据树 -> 可交互 UI 树”
+
+这就是左侧文件树能展开目录、点击文件、勾选上下文的原因。
+
+6. 点击文件后读取内容
+还是从左侧组件开始：
+
+onOpenFile(node.path)
+然后页面层在：
+
+FolderPickerWorkspacePage.tsx
+调用：
+
+handleOpenFile(path)
+这里会继续调用：
+
+readSelectedRepoFile(path)
+这个函数在：
+
+localRepoService.ts
+它会通过之前建立的“路径 -> 文件句柄”映射，读出真实文件内容，再交给 store 和右侧查看器展示。
+
+这条链最重要的理解点
+你可以把文件树链路总结成一句话：
+
+用户授权本地目录后，前端基于 File System Access API 递归构建 RepoNode 树，同时维护文件路径和文件句柄映射；文件树进入 Zustand store 后，左侧递归渲染，点击文件时再按路径读取内容并同步到右侧查看器。
+
+最后一句话总结版
+如果面试里你想更简洁地答：
+
+这个项目的文件树不是服务端返回的，而是前端在用户选择本地文件夹后，基于 File System Access API 递归构建出来的。前端不仅生成了 RepoNode 树，还维护了路径到文件句柄的映射，所以后面既能按路径读取文件内容，也能在审批后直接把修改写回本地文件。
+

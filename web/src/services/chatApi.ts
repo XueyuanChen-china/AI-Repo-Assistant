@@ -90,10 +90,14 @@ export async function streamChatRequest(payload: ChatRequest, handlers: StreamHa
     if (done) {
       break
     }
-
+    //{ stream: true }暂存不完整的字节 等下一块数据来拼接
     buffer += decoder.decode(value, { stream: true })
 
     while (true) {
+      //\n\n作为事件边界，解析出完整事件后调用一次handlers.onEvent，剩余部分继续等待后续数据拼接
+      //data: {"type":"token","content":"你"}\n\ndata: {"type":"token","content":"好"}\n\n
+      //data: {"type":"token","content":"你"}\n\n
+      //data: {"type":"token",
       const boundaryIndex = buffer.indexOf('\n\n')
 
       if (boundaryIndex === -1) {
