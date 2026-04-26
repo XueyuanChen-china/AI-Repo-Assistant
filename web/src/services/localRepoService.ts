@@ -1,4 +1,5 @@
 import type { RepoFile, RepoNode } from '@ai-repo-assistant/shared'
+import { off } from 'node:cluster'
 
 // 文件类型定义：可以是浏览器原生File对象或文件系统句柄
 type FileLike = File | FileSystemFileHandle
@@ -457,7 +458,7 @@ export async function pickLocalRepository() {
   const pickerWindow = window as PickerWindow
 
   // 优先使用原生的showDirectoryPicker API
-  if (typeof pickerWindow.showDirectoryPicker === 'function') {
+  if (typeof pickerWindow.showDirectoryPicker==='function') {
     try {
       const directoryHandle = await pickerWindow.showDirectoryPicker()
       return buildSnapshotFromDirectoryHandle(directoryHandle)
