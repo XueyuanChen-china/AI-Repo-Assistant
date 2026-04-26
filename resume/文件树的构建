@@ -161,3 +161,7 @@ localRepoService.ts
 
 这个项目的文件树不是服务端返回的，而是前端在用户选择本地文件夹后，基于 File System Access API 递归构建出来的。前端不仅生成了 RepoNode 树，还维护了路径到文件句柄的映射，所以后面既能按路径读取文件内容，也能在审批后直接把修改写回本地文件。
 
+
+
+
+showDirectoryPicker是windows中比较新的api  让用户选择一个本地文件夹，并返回一个“可操作句柄”  返回这个 FileSystemDirectoryHandle 
